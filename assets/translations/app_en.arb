@@ -1,0 +1,10 @@
+{
+  "@@locale": "en",
+  "appTitle": "Meet Thai",
+  "login": "Login",
+  "discovery": "Discovery",
+  "profile": "Profile",
+  "chat": "Chat",
+  "search": "Search",
+  "settings": "Settings"
+}

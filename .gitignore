@@ -1,0 +1,100 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.buildlog/
+.history
+.svn/
+migrate_working_dir/
+
+# IntelliJ / Android Studio / VS Code
+*.iml
+*.ipr
+*.iws
+.idea/
+.vscode/
+*.code-workspace
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+
+# Flutter generated
+**/GeneratedPluginRegistrant.*
+**/generated_plugin_registrant.*
+
+# Android
+android/.gradle/
+android/local.properties
+android/app/debug/
+android/app/profile/
+android/app/release/
+android/app/build/
+android/build/
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/Generated.xcconfig
+ios/Flutter/ephemeral/
+ios/Runner/GeneratedPluginRegistrant.*
+
+# macOS
+macos/Pods/
+macos/.symlinks/
+macos/Flutter/ephemeral/
+macos/Flutter/GeneratedPluginRegistrant.swift
+
+# Windows
+windows/flutter/ephemeral/
+
+# Linux
+linux/flutter/ephemeral/
+
+# Web build
+web/.dart_tool/
+
+# Node / Supabase CLI
+node_modules/
+package-lock.json
+
+# Supabase local temp
+supabase/.temp/
+
+# APK / Release outputs
+release_apks/
+*.apk
+*.aab
+*.ipa
+
+# Secrets / Keys
+.env
+.env.*
+*.env
+service-account.json
+.env.push
+*.jks
+*.keystore
+key.properties
+google-services-private.json
+
+# Firebase / Google private credentials
+**/service-account.json
+**/*service-account*.json
+**/*credentials*.json
+
+# Local backups
+screens_bak/
+web_backup/
+*.bak

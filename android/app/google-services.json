@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "541550784769",
+    "project_id": "meet-thai-dating",
+    "storage_bucket": "meet-thai-dating.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:541550784769:android:1386845da17eb789e72b00",
+        "android_client_info": {
+          "package_name": "at.taxidany.meetthai"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDGZHLxLWui1mO0KLDmwc-OtYvfLQ_KUp4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:541550784769:android:db306022100d966ee72b00",
+        "android_client_info": {
+          "package_name": "com.example.meet_thai"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDGZHLxLWui1mO0KLDmwc-OtYvfLQ_KUp4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
