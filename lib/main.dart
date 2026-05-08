@@ -1,9 +1,10 @@
-import 'dart:ui';
 import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -37,6 +38,10 @@ Future<void> main() async {
       FlutterError.presentError(details);
       debugPrint('FLUTTER ERROR: ${details.exception}');
       debugPrint('FLUTTER STACK: ${details.stack}');
+
+      if (Firebase.apps.isNotEmpty) {
+        FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+      }
     };
 
     ErrorWidget.builder = (FlutterErrorDetails details) {
@@ -88,6 +93,16 @@ Future<void> main() async {
         firebaseReady = true;
       } else {
         debugPrint('Firebase init fehlgeschlagen: $e');
+        debugPrint('$st');
+      }
+    }
+
+    if (firebaseReady) {
+      try {
+        await FirebaseAnalytics.instance.logAppOpen();
+        debugPrint('Firebase Analytics app_open gesendet');
+      } catch (e, st) {
+        debugPrint('Firebase Analytics app_open fehlgeschlagen: $e');
         debugPrint('$st');
       }
     }
@@ -179,6 +194,14 @@ Future<void> main() async {
 
     runApp(MyApp(hasSupabaseConfig: hasSupabaseConfig));
   }, (error, stack) {
+    if (Firebase.apps.isNotEmpty) {
+      FirebaseCrashlytics.instance.recordError(
+        error,
+        stack,
+        fatal: true,
+      );
+    }
+
     debugPrint('ZONE ERROR: $error');
     debugPrint('$stack');
   });

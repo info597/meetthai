@@ -1,3 +1,4 @@
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class LikeResult {
@@ -174,4 +175,10 @@ class LikeService {
     }
     return null;
   }
+}
+
+Future<void> trackLikeSentAnalytics() async {
+  await FirebaseAnalytics.instance.logEvent(
+    name: 'like_sent',
+  );
 }

@@ -1,3 +1,4 @@
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 
@@ -63,4 +64,17 @@ class AuthService {
       debugPrint('[RC] Login Fehler: $e');
     }
   }
+}
+
+Future<void> trackLoginAnalytics() async {
+  await FirebaseAnalytics.instance.logLogin(
+    loginMethod: 'email',
+  );
+}
+
+
+Future<void> trackSignupAnalytics() async {
+  await FirebaseAnalytics.instance.logSignUp(
+    signUpMethod: 'email',
+  );
 }
