@@ -7,4 +7,9 @@ class Config {
 
   static const revenueCatPublicKey =
       "goog_LtNCuTvbZSkUqGlmbRXOkXkRyak";
+
+  static const int defaultDailyLikeLimit = 10;
+  static const bool defaultMaintenanceMode = false;
+  static const bool defaultPremiumEnabled = true;
+  static const String defaultMinimumSupportedVersion = "1.0.0";
 }

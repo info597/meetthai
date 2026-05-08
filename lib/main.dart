@@ -24,6 +24,7 @@ import 'matches_screen.dart';
 import 'profile_edit_screen.dart';
 import 'profile_preview_screen.dart';
 import 'services/push_service.dart';
+import 'services/remote_config_service.dart';
 import 'services/subscription_service.dart';
 import 'upgrade_screen.dart';
 
@@ -38,10 +39,6 @@ Future<void> main() async {
       FlutterError.presentError(details);
       debugPrint('FLUTTER ERROR: ${details.exception}');
       debugPrint('FLUTTER STACK: ${details.stack}');
-
-      if (Firebase.apps.isNotEmpty) {
-        FirebaseCrashlytics.instance.recordFlutterFatalError(details);
-      }
     };
 
     ErrorWidget.builder = (FlutterErrorDetails details) {
@@ -99,10 +96,10 @@ Future<void> main() async {
 
     if (firebaseReady) {
       try {
-        await FirebaseAnalytics.instance.logAppOpen();
-        debugPrint('Firebase Analytics app_open gesendet');
+        await RemoteConfigService.instance.init();
+        debugPrint('Firebase Remote Config init erfolgreich');
       } catch (e, st) {
-        debugPrint('Firebase Analytics app_open fehlgeschlagen: $e');
+        debugPrint('Firebase Remote Config init fehlgeschlagen: $e');
         debugPrint('$st');
       }
     }
@@ -194,14 +191,6 @@ Future<void> main() async {
 
     runApp(MyApp(hasSupabaseConfig: hasSupabaseConfig));
   }, (error, stack) {
-    if (Firebase.apps.isNotEmpty) {
-      FirebaseCrashlytics.instance.recordError(
-        error,
-        stack,
-        fatal: true,
-      );
-    }
-
     debugPrint('ZONE ERROR: $error');
     debugPrint('$stack');
   });
