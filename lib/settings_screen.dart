@@ -441,7 +441,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             borderRadius: BorderRadius.circular(12),
           ),
           child: const Text(
@@ -493,7 +493,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         Text(
           'Falls kein interner Text hinterlegt ist, kann optional die externe Version verwendet werden.',
           style: TextStyle(
-            color: Colors.black.withOpacity(0.62),
+            color: Colors.black.withValues(alpha: 0.62),
             fontWeight: FontWeight.w600,
             height: 1.35,
           ),

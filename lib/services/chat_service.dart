@@ -100,29 +100,18 @@ class ChatService {
     }
   }
 
-  static Future<Set<String>> _loadDeletedUserIds() async {
+  static Future<bool> _isUserDeleted(String userId) async {
     try {
-      final rows =
-          await _supa.from('profiles').select('user_id').eq('is_deleted', true);
+      final row = await _supa
+          .from('profiles')
+          .select('is_deleted, deleted_at')
+          .eq('user_id', userId)
+          .maybeSingle();
 
-      return (rows as List)
-          .map((row) => (row['user_id'] ?? '').toString())
-          .where((id) => id.isNotEmpty)
-          .toSet();
+      if (row == null) return true;
+      return row['is_deleted'] == true || row['deleted_at'] != null;
     } catch (_) {
-      try {
-        final rows = await _supa
-            .from('profiles')
-            .select('user_id')
-            .not('deleted_at', 'is', null);
-
-        return (rows as List)
-            .map((row) => (row['user_id'] ?? '').toString())
-            .where((id) => id.isNotEmpty)
-            .toSet();
-      } catch (_) {
-        return <String>{};
-      }
+      return false;
     }
   }
 
@@ -153,10 +142,11 @@ class ChatService {
       for (final r in rows) {
         final recipientId = r['recipient_id']?.toString();
         final isRead = r['is_read'] == true;
+
         if (recipientId != me || isRead) continue;
 
         final cid = r['conversation_id']?.toString();
-        if (cid == null) continue;
+        if (cid == null || cid.isEmpty) continue;
 
         map[cid] = (map[cid] ?? 0) + 1;
       }
@@ -196,13 +186,45 @@ class ChatService {
         .eq('is_read', false);
   }
 
+  static Future<Map<String, Map<String, dynamic>>> _loadLastMessagesByConvoIds(
+    List<String> convoIds,
+  ) async {
+    const batchSize = 10;
+    final result = <String, Map<String, dynamic>>{};
+
+    for (var i = 0; i < convoIds.length; i += batchSize) {
+      final batch = convoIds.skip(i).take(batchSize).toList();
+
+      await Future.wait(
+        batch.map((cid) async {
+          try {
+            final row = await _supa
+                .from('messages')
+                .select(
+                  'id, conversation_id, sender_id, recipient_id, body, created_at, is_read, message_type, media_url',
+                )
+                .eq('conversation_id', cid)
+                .order('created_at', ascending: false)
+                .limit(1)
+                .maybeSingle();
+
+            if (row != null) {
+              result[cid] = Map<String, dynamic>.from(row);
+            }
+          } catch (_) {}
+        }),
+      );
+    }
+
+    return result;
+  }
+
   static Future<List<ConversationSummary>> loadConversationList({
     int limit = 80,
   }) async {
     final me = _requireUserId();
 
     final blockedUserIds = await _loadBlockedUserIds();
-    final deletedUserIds = await _loadDeletedUserIds();
 
     final convoRows = await _supa
         .from('conversations')
@@ -220,7 +242,6 @@ class ChatService {
       final other = (a == me) ? b : a;
 
       if (blockedUserIds.contains(other)) return false;
-      if (deletedUserIds.contains(other)) return false;
 
       return true;
     }).toList();
@@ -249,23 +270,7 @@ class ChatService {
       }
     } catch (_) {}
 
-    final msgRows = await _supa
-        .from('messages')
-        .select(
-          'id, conversation_id, sender_id, recipient_id, body, created_at, is_read, message_type, media_url',
-        )
-        .inFilter('conversation_id', convoIds)
-        .order('created_at', ascending: false)
-        .limit(600);
-
-    final msgs = (msgRows as List).cast<Map<String, dynamic>>();
-    final Map<String, Map<String, dynamic>> lastMsgByConvo = {};
-
-    for (final m in msgs) {
-      final cid = m['conversation_id']?.toString();
-      if (cid == null) continue;
-      lastMsgByConvo.putIfAbsent(cid, () => m);
-    }
+    final lastMsgByConvo = await _loadLastMessagesByConvoIds(convoIds);
 
     final otherUserIds = <String>{};
     for (final c in convos) {
@@ -306,10 +311,6 @@ class ChatService {
       final a = c['user1_id'].toString();
       final b = c['user2_id'].toString();
       final other = (a == me) ? b : a;
-
-      if (deletedUserIds.contains(other)) {
-        continue;
-      }
 
       final profile = profileByUser[other];
       if (profile == null) {
@@ -352,14 +353,10 @@ class ChatService {
     return _supa
         .from('messages')
         .stream(primaryKey: ['id'])
+        .eq('conversation_id', conversationId)
         .order('created_at', ascending: true)
         .map(
-          (rows) => rows
-              .where(
-                (row) => row['conversation_id']?.toString() == conversationId,
-              )
-              .map((row) => ChatMessage.fromMap(row))
-              .toList(),
+          (rows) => rows.map((row) => ChatMessage.fromMap(row)).toList(),
         );
   }
 
@@ -394,8 +391,7 @@ class ChatService {
       throw Exception('BLOCKED');
     }
 
-    final deletedUserIds = await _loadDeletedUserIds();
-    if (deletedUserIds.contains(otherUserId)) {
+    if (await _isUserDeleted(otherUserId)) {
       throw Exception('USER_DELETED');
     }
 
@@ -410,7 +406,25 @@ class ChatService {
   }
 
   static Future<void> deleteConversation(String conversationId) async {
-    _requireUserId();
+    final me = _requireUserId();
+
+    final convo = await _supa
+        .from('conversations')
+        .select('id, user1_id, user2_id')
+        .eq('id', conversationId)
+        .maybeSingle();
+
+    if (convo == null) {
+      throw Exception('Conversation nicht gefunden.');
+    }
+
+    final user1 = convo['user1_id']?.toString();
+    final user2 = convo['user2_id']?.toString();
+
+    if (user1 != me && user2 != me) {
+      throw Exception('Keine Berechtigung für diese Conversation.');
+    }
+
     await _supa.from('messages').delete().eq('conversation_id', conversationId);
     await _supa.from('conversations').delete().eq('id', conversationId);
   }

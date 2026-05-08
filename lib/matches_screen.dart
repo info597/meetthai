@@ -159,7 +159,8 @@ class _MatchesScreenState extends State<MatchesScreen> {
         final p = profileById[uid];
         if (p == null) continue;
 
-        final convoId = await ChatService.getOrCreateConversationId(uid);
+        final convoId = await MatchService.getMatchConversationId(uid) ??
+            await ChatService.getOrCreateConversationId(uid);
 
         loadedItems.add({
           'userId': uid,
@@ -196,8 +197,10 @@ class _MatchesScreenState extends State<MatchesScreen> {
     if (otherUserId.isEmpty) return;
 
     try {
-      final conversationId = item['conversationId'] ??
-          await ChatService.getOrCreateConversationId(otherUserId);
+      final savedConversationId = (item['conversationId'] ?? '').trim();
+      final conversationId = savedConversationId.isNotEmpty
+          ? savedConversationId
+          : await ChatService.getOrCreateConversationId(otherUserId);
 
       if (!mounted) return;
 
@@ -317,8 +320,11 @@ class _MatchesScreenState extends State<MatchesScreen> {
   }
 
   Widget _buildMatchesList() {
-    return ListView.separated(
-      itemCount: _items.length,
+    return RefreshIndicator(
+      onRefresh: _refreshScreen,
+      child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: _items.length,
       separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (context, i) {
         final it = _items[i];
@@ -356,6 +362,7 @@ class _MatchesScreenState extends State<MatchesScreen> {
           onTap: () => _openChat(it),
         );
       },
+      ),
     );
   }
 

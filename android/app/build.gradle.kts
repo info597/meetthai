@@ -18,7 +18,7 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace = "at.taxidany.meetthai"
+    namespace = "com.meetthai.dating"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -32,11 +32,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "at.taxidany.meetthai"
+        applicationId = "com.meetthai.dating"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
     }
 
     signingConfigs {

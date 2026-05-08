@@ -554,7 +554,7 @@ class _ProfilePreviewScreenState extends State<ProfilePreviewScreen> {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             borderRadius: BorderRadius.circular(14),
           ),
           child: Row(
@@ -606,7 +606,7 @@ class _ProfilePreviewScreenState extends State<ProfilePreviewScreen> {
                     : _isPremiumStatus
                         ? Colors.pink
                         : Colors.blueGrey)
-                .withOpacity(0.08),
+                .withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: (_isGoldStatus
@@ -614,7 +614,7 @@ class _ProfilePreviewScreenState extends State<ProfilePreviewScreen> {
                       : _isPremiumStatus
                           ? Colors.pink
                           : Colors.blueGrey)
-                  .withOpacity(0.20),
+                  .withValues(alpha: 0.20),
             ),
           ),
           child: Row(
@@ -746,9 +746,9 @@ class _LocalPlanStatusChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.14),
+          color: color.withValues(alpha: 0.14),
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: color.withOpacity(0.35)),
+          border: Border.all(color: color.withValues(alpha: 0.35)),
         ),
         child: Text(
           text,
@@ -789,9 +789,9 @@ class _ProfileInfoRow extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.04),
+          color: Colors.black.withValues(alpha: 0.04),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.black.withOpacity(0.08)),
+          border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
         ),
         child: multiline
             ? Column(
@@ -800,7 +800,7 @@ class _ProfileInfoRow extends StatelessWidget {
                   Text(
                     label,
                     style: TextStyle(
-                      color: Colors.black.withOpacity(0.65),
+                      color: Colors.black.withValues(alpha: 0.65),
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -819,7 +819,7 @@ class _ProfileInfoRow extends StatelessWidget {
                     child: Text(
                       label,
                       style: TextStyle(
-                        color: Colors.black.withOpacity(0.65),
+                        color: Colors.black.withValues(alpha: 0.65),
                         fontWeight: FontWeight.w600,
                       ),
                     ),

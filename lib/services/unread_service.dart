@@ -11,6 +11,8 @@ class UnreadService extends ChangeNotifier {
 
   bool _initialized = false;
   bool _loading = false;
+  bool _refreshing = false;
+
   int _totalUnread = 0;
   String? _currentUserId;
 
@@ -51,6 +53,9 @@ class UnreadService extends ChangeNotifier {
       return;
     }
 
+    if (_refreshing) return;
+    _refreshing = true;
+
     _loading = true;
     notifyListeners();
 
@@ -61,17 +66,23 @@ class UnreadService extends ChangeNotifier {
           .eq('recipient_id', user.id)
           .eq('is_read', false);
 
-      _totalUnread = (rows as List).length;
+      final newTotal = (rows as List).length;
+
+      if (_totalUnread != newTotal) {
+        _totalUnread = newTotal;
+      }
     } catch (e) {
       debugPrint('[UnreadService] refresh error: $e');
     } finally {
       _loading = false;
+      _refreshing = false;
       notifyListeners();
     }
   }
 
   Future<void> reset() async {
     _loading = false;
+    _refreshing = false;
     _totalUnread = 0;
     _currentUserId = null;
     notifyListeners();
@@ -87,8 +98,13 @@ class UnreadService extends ChangeNotifier {
 
   void clear() {
     _loading = false;
+    _refreshing = false;
     _totalUnread = 0;
     notifyListeners();
+  }
+
+  Future<void> markConversationSeenLocally() async {
+    await refresh();
   }
 
   void _subscribeRealtime(String userId) {
@@ -102,11 +118,9 @@ class UnreadService extends ChangeNotifier {
         callback: (payload) async {
           final row = payload.newRecord;
           final recipientId = row['recipient_id']?.toString();
-          final isRead = row['is_read'] == true;
 
-          if (recipientId == userId && !isRead) {
-            _totalUnread++;
-            notifyListeners();
+          if (recipientId == userId) {
+            await refresh();
           }
         },
       )
@@ -115,30 +129,30 @@ class UnreadService extends ChangeNotifier {
         schema: 'public',
         table: 'messages',
         callback: (payload) async {
-          final oldRow = payload.oldRecord;
-          final newRow = payload.newRecord;
+          final row = payload.newRecord;
+          final recipientId = row['recipient_id']?.toString();
 
-          final oldRecipientId = oldRow['recipient_id']?.toString();
-          final newRecipientId = newRow['recipient_id']?.toString();
-
-          final oldIsRead = oldRow['is_read'] == true;
-          final newIsRead = newRow['is_read'] == true;
-
-          if (oldRecipientId == userId &&
-              newRecipientId == userId &&
-              !oldIsRead &&
-              newIsRead) {
-            if (_totalUnread > 0) {
-              _totalUnread--;
-              notifyListeners();
-            } else {
-              await refresh();
-            }
+          if (recipientId == userId) {
+            await refresh();
+          } else {
+            await refresh();
           }
+        },
+      )
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.delete,
+        schema: 'public',
+        table: 'messages',
+        callback: (payload) async {
+          await refresh();
         },
       )
       ..subscribe((status, [error]) async {
         debugPrint('[UnreadService] realtime status: $status error=$error');
+
+        if (status == RealtimeSubscribeStatus.subscribed) {
+          await refresh();
+        }
 
         if (status == RealtimeSubscribeStatus.channelError ||
             status == RealtimeSubscribeStatus.timedOut) {

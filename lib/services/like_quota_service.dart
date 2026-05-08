@@ -75,7 +75,7 @@ class LikeQuotaService {
     planCode: 'free',
     dailyLikeLimit: 10,
     usedLikesToday: 0,
-    remainingLikesToday: 10,
+    remainingLikesToday: 20,
     unlimited: false,
   );
 

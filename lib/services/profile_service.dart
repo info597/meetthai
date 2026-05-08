@@ -78,7 +78,7 @@ class ProfileService {
 
     if (data == null) return null;
 
-    return UserProfile.fromMap(data as Map<String, dynamic>);
+    return UserProfile.fromMap(data);
   }
 
   /// Speichert / upsert das Profil des aktuellen Users.

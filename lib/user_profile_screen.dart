@@ -92,7 +92,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             .from('matches')
             .select('conversation_id')
             .or(
-              'and(user_a.eq.${me.id},user_b.eq.${widget.userId}),and(user_a.eq.${widget.userId},user_b.eq.${me.id})',
+              'and(user_a.eq.$me.id,user_b.eq.$widget.userId),and(user_a.eq.$widget.userId,user_b.eq.$me.id)',
             )
             .maybeSingle(),
         _supa
@@ -105,7 +105,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             .from('user_blocks')
             .select('blocker_user_id, blocked_user_id')
             .or(
-              'and(blocker_user_id.eq.${me.id},blocked_user_id.eq.${widget.userId}),and(blocker_user_id.eq.${widget.userId},blocked_user_id.eq.${me.id})',
+              'and(blocker_user_id.eq.$me.id,blocked_user_id.eq.$widget.userId),and(blocker_user_id.eq.$widget.userId,blocked_user_id.eq.$me.id)',
             )
             .maybeSingle(),
       ]);
@@ -346,10 +346,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             ),
             content: Text(
               _t.isGerman
-                  ? 'Wenn du ${_displayName} blockierst, werden Chat, Match, Likes und Unterhaltung dauerhaft entfernt.'
+                  ? 'Wenn du $_displayName blockierst, werden Chat, Match, Likes und Unterhaltung dauerhaft entfernt.'
                   : _t.isThai
-                      ? 'หากคุณบล็อก ${_displayName} แชต แมตช์ ไลก์ และการสนทนาจะถูกลบอย่างถาวร'
-                      : 'If you block ${_displayName}, chat, match, likes and conversation will be permanently removed.',
+                      ? 'หากคุณบล็อก $_displayName แชต แมตช์ ไลก์ และการสนทนาจะถูกลบอย่างถาวร'
+                      : 'If you block $_displayName, chat, match, likes and conversation will be permanently removed.',
             ),
             actions: [
               TextButton(
@@ -399,10 +399,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         SnackBar(
           content: Text(
             _t.isGerman
-                ? '${_displayName} wurde blockiert.'
+                ? '$_displayName wurde blockiert.'
                 : _t.isThai
-                    ? 'บล็อก ${_displayName} แล้ว'
-                    : '${_displayName} was blocked.',
+                    ? 'บล็อก $_displayName แล้ว'
+                    : '$_displayName was blocked.',
           ),
         ),
       );
@@ -441,10 +441,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             ),
             content: Text(
               _t.isGerman
-                  ? 'Wenn du ${_displayName} entblockst, kann das Profil wieder sichtbar werden. Gelöschte Chats, Matches und Likes werden aber nicht automatisch wiederhergestellt.'
+                  ? 'Wenn du $_displayName entblockst, kann das Profil wieder sichtbar werden. Gelöschte Chats, Matches und Likes werden aber nicht automatisch wiederhergestellt.'
                   : _t.isThai
-                      ? 'หากคุณยกเลิกการบล็อก ${_displayName} โปรไฟล์นี้อาจมองเห็นได้อีกครั้ง แต่แชต แมตช์ และไลก์ที่ถูกลบจะไม่ถูกกู้คืนอัตโนมัติ'
-                      : 'If you unblock ${_displayName}, the profile may become visible again. Deleted chats, matches and likes are not automatically restored.',
+                      ? 'หากคุณยกเลิกการบล็อก $_displayName โปรไฟล์นี้อาจมองเห็นได้อีกครั้ง แต่แชต แมตช์ และไลก์ที่ถูกลบจะไม่ถูกกู้คืนอัตโนมัติ'
+                      : 'If you unblock $_displayName, the profile may become visible again. Deleted chats, matches and likes are not automatically restored.',
             ),
             actions: [
               TextButton(
@@ -491,10 +491,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         SnackBar(
           content: Text(
             _t.isGerman
-                ? '${_displayName} wurde entblockt.'
+                ? '$_displayName wurde entblockt.'
                 : _t.isThai
-                    ? 'ยกเลิกบล็อก ${_displayName} แล้ว'
-                    : '${_displayName} was unblocked.',
+                    ? 'ยกเลิกบล็อก $_displayName แล้ว'
+                    : '$_displayName was unblocked.',
           ),
         ),
       );
@@ -993,10 +993,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       margin: const EdgeInsets.only(top: 8, bottom: 20),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.pink.withOpacity(0.06),
+        color: Colors.pink.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: Colors.pink.withOpacity(0.14),
+          color: Colors.pink.withValues(alpha: 0.14),
         ),
       ),
       child: Column(
@@ -1005,7 +1005,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           Text(
             description,
             style: TextStyle(
-              color: Colors.black.withOpacity(0.72),
+              color: Colors.black.withValues(alpha: 0.72),
               fontWeight: FontWeight.w600,
               height: 1.35,
             ),
@@ -1274,9 +1274,9 @@ class _ProfileInfoRow extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.04),
+          color: Colors.black.withValues(alpha: 0.04),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.black.withOpacity(0.08)),
+          border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
         ),
         child: multiline
             ? Column(
@@ -1285,7 +1285,7 @@ class _ProfileInfoRow extends StatelessWidget {
                   Text(
                     label,
                     style: TextStyle(
-                      color: Colors.black.withOpacity(0.65),
+                      color: Colors.black.withValues(alpha: 0.65),
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -1304,7 +1304,7 @@ class _ProfileInfoRow extends StatelessWidget {
                     child: Text(
                       label,
                       style: TextStyle(
-                        color: Colors.black.withOpacity(0.65),
+                        color: Colors.black.withValues(alpha: 0.65),
                         fontWeight: FontWeight.w600,
                       ),
                     ),

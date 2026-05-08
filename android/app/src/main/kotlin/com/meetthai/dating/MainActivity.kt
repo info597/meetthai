@@ -1,4 +1,4 @@
-package at.taxidany.meetthai
+package com.meetthai.dating
 
 import io.flutter.embedding.android.FlutterActivity
 

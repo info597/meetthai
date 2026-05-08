@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'i18n/app_strings.dart';
+import 'match_celebration_screen.dart';
 import 'services/discovery_service.dart';
 import 'services/like_quota_service.dart';
 import 'services/like_service.dart';
@@ -19,19 +22,32 @@ class DiscoveryScreen extends StatefulWidget {
   State<DiscoveryScreen> createState() => _DiscoveryScreenState();
 }
 
+enum _SwipeFeedbackType {
+  like,
+  superLike,
+  nope,
+}
+
 class _DiscoveryScreenState extends State<DiscoveryScreen> {
   final _supa = Supabase.instance.client;
   final _subscription = SubscriptionState.instance;
 
   bool _loading = true;
   bool _liking = false;
-  bool _reporting = false;
   String? _error;
 
   final List<DiscoveryProfile> _profiles = [];
   int _index = 0;
 
   LikeQuota? _quota;
+
+  Timer? _swipeFeedbackTimer;
+  Timer? _particleTimer;
+  _SwipeFeedbackType? _swipeFeedback;
+  double _swipeFeedbackProgress = 0;
+  double _dragOffsetX = 0;
+  bool _showLikeParticles = false;
+  bool _showSuperParticles = false;
 
   @override
   void initState() {
@@ -47,6 +63,8 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
   @override
   void dispose() {
+    _swipeFeedbackTimer?.cancel();
+    _particleTimer?.cancel();
     _subscription.removeListener(_onSubscriptionChanged);
     super.dispose();
   }
@@ -150,6 +168,8 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       _error = null;
       _profiles.clear();
       _index = 0;
+      _swipeFeedback = null;
+      _swipeFeedbackProgress = 0;
     });
 
     try {
@@ -214,6 +234,12 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
   DiscoveryProfile? get _currentProfile =>
       _hasCurrent ? _profiles[_index] : null;
+
+  DiscoveryProfile? get _nextProfile {
+    final nextIndex = _index + 1;
+    if (nextIndex < 0 || nextIndex >= _profiles.length) return null;
+    return _profiles[nextIndex];
+  }
 
   bool get _canSendLikeByQuota {
     final quota = _quota;
@@ -291,14 +317,6 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     return removed;
   }
 
-  void _removeCurrent() {
-    if (!_hasCurrent) return;
-
-    setState(() {
-      _removeCurrentWithoutSetState();
-    });
-  }
-
   void _reinsertProfileAtCurrentSpot(
     DiscoveryProfile profile,
     int indexBefore,
@@ -311,203 +329,97 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     });
   }
 
-  List<String> _reportReasons(AppStrings t) {
-    if (t.isGerman) {
-      return [
-        'Nacktheit oder sexuelle Inhalte',
-        'Kontaktdaten im Profil',
-        'Fake-Profil',
-        'Belästigung oder Spam',
-        'Betrug oder verdächtiges Verhalten',
-        'Andere',
-      ];
+  void _clearSwipeFeedback() {
+    _swipeFeedbackTimer?.cancel();
+
+    if (_swipeFeedback == null && _swipeFeedbackProgress == 0) return;
+
+    setState(() {
+      _swipeFeedback = null;
+      _swipeFeedbackProgress = 0;
+    });
+  }
+
+  void _startSwipeFeedback(_SwipeFeedbackType type) {
+    _swipeFeedbackTimer?.cancel();
+
+    setState(() {
+      _swipeFeedback = type;
+      _swipeFeedbackProgress = 1;
+    });
+
+    _swipeFeedbackTimer = Timer(const Duration(milliseconds: 520), () {
+      if (!mounted) return;
+      setState(() {
+        _swipeFeedback = null;
+        _swipeFeedbackProgress = 0;
+      });
+    });
+  }
+
+  void _updateSwipeFeedback(DismissUpdateDetails details) {
+    if (_liking) return;
+
+    final progress = details.progress.clamp(0.0, 1.0).toDouble();
+    final signedProgress = details.direction == DismissDirection.endToStart
+        ? -progress
+        : progress;
+
+    if (progress < 0.015) {
+      if (_swipeFeedback != null || _swipeFeedbackProgress != 0) {
+        setState(() {
+          _swipeFeedback = null;
+          _swipeFeedbackProgress = 0;
+          _dragOffsetX = 0;
+          _dragOffsetX = 0;
+        });
+      }
+      return;
     }
 
-    if (t.isThai) {
-      return [
-        'ภาพเปลือยหรือเนื้อหาทางเพศ',
-        'มีข้อมูลติดต่อในโปรไฟล์',
-        'โปรไฟล์ปลอม',
-        'คุกคามหรือสแปม',
-        'หลอกลวงหรือพฤติกรรมน่าสงสัย',
-        'อื่น ๆ',
-      ];
+    _SwipeFeedbackType? type;
+
+    if (details.direction == DismissDirection.startToEnd) {
+      type = _SwipeFeedbackType.like;
+    } else if (details.direction == DismissDirection.endToStart) {
+      type = _SwipeFeedbackType.nope;
     }
 
-    return [
-      'Nudity or sexual content',
-      'Contact details in profile',
-      'Fake profile',
-      'Harassment or spam',
-      'Scam or suspicious behavior',
-      'Other',
-    ];
-  }
+    if (type == null) return;
 
-  String _reportTitle(AppStrings t) {
-    if (t.isGerman) return 'Profil melden';
-    if (t.isThai) return 'รายงานโปรไฟล์';
-    return 'Report profile';
-  }
+    final boostedProgress = ((progress - 0.010) / 0.22).clamp(0.0, 1.0);
 
-  String _reportReasonLabel(AppStrings t) {
-    if (t.isGerman) return 'Grund';
-    if (t.isThai) return 'เหตุผล';
-    return 'Reason';
-  }
-
-  String _reportDetailsLabel(AppStrings t) {
-    if (t.isGerman) return 'Details optional';
-    if (t.isThai) return 'รายละเอียดเพิ่มเติม (ไม่บังคับ)';
-    return 'Details optional';
-  }
-
-  String _reportButtonLabel(AppStrings t) {
-    if (t.isGerman) return 'Melden';
-    if (t.isThai) return 'รายงาน';
-    return 'Report';
-  }
-
-  String _reportSuccessMessage(AppStrings t) {
-    if (t.isGerman) return 'Danke. Deine Meldung wurde gespeichert.';
-    if (t.isThai) return 'ขอบคุณ รายงานของคุณถูกบันทึกแล้ว';
-    return 'Thank you. Your report has been saved.';
-  }
-
-  String _reportErrorMessage(AppStrings t, Object e) {
-    if (t.isGerman) return 'Meldung konnte nicht gesendet werden: $e';
-    if (t.isThai) return 'ไม่สามารถส่งรายงานได้: $e';
-    return 'Report could not be sent: $e';
-  }
-
-  Future<void> _openReportDialog(DiscoveryProfile profile) async {
-    if (_reporting) return;
-
-    final me = _supa.auth.currentUser;
-    if (me == null) return;
-
-    final t = AppStrings.of(context);
-    final reasons = _reportReasons(t);
-    String selectedReason = reasons.first;
-    final detailsCtrl = TextEditingController();
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (dialogContext, setDialogState) {
-            return AlertDialog(
-              title: Text(_reportTitle(t)),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    DropdownButtonFormField<String>(
-                      value: selectedReason,
-                      isExpanded: true,
-                      decoration: InputDecoration(
-                        labelText: _reportReasonLabel(t),
-                        border: const OutlineInputBorder(),
-                      ),
-                      items: reasons
-                          .map(
-                            (reason) => DropdownMenuItem<String>(
-                              value: reason,
-                              child: Text(
-                                reason,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        if (value == null) return;
-                        setDialogState(() {
-                          selectedReason = value;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: detailsCtrl,
-                      minLines: 3,
-                      maxLines: 5,
-                      decoration: InputDecoration(
-                        labelText: _reportDetailsLabel(t),
-                        border: const OutlineInputBorder(),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext, false),
-                  child: Text(t.cancel),
-                ),
-                ElevatedButton.icon(
-                  onPressed: () => Navigator.pop(dialogContext, true),
-                  icon: const Icon(Icons.flag_rounded),
-                  label: Text(_reportButtonLabel(t)),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-
-    if (confirmed != true) {
-      detailsCtrl.dispose();
+    if (_swipeFeedback == type &&
+        (_swipeFeedbackProgress - boostedProgress).abs() < 0.015) {
       return;
     }
 
     setState(() {
-      _reporting = true;
+      _swipeFeedback = type;
+      _swipeFeedbackProgress = boostedProgress;
+      _dragOffsetX = signedProgress.clamp(-1.0, 1.0).toDouble();
+    });
+  }
+
+  Future<void> _waitForSwipeFeedback() async {
+    await Future.delayed(const Duration(milliseconds: 240));
+  }
+
+  void _triggerFloatingParticles({required bool superLike}) {
+    _particleTimer?.cancel();
+
+    setState(() {
+      _showLikeParticles = !superLike;
+      _showSuperParticles = superLike;
     });
 
-    try {
-      await _supa.from('reports').insert({
-        'reporter_user_id': me.id,
-        'reported_user_id': profile.userId,
-        'report_type': 'profile',
-        'reason': selectedReason,
-        'details': detailsCtrl.text.trim().isEmpty
-            ? null
-            : detailsCtrl.text.trim(),
-        'status': 'open',
-      });
-
+    _particleTimer = Timer(const Duration(milliseconds: 900), () {
       if (!mounted) return;
-
       setState(() {
-        _profiles.removeWhere((p) => p.userId == profile.userId);
-
-        if (_profiles.isEmpty) {
-          _index = 0;
-        } else if (_index >= _profiles.length) {
-          _index = _profiles.length - 1;
-        }
+        _showLikeParticles = false;
+        _showSuperParticles = false;
       });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_reportSuccessMessage(t))),
-      );
-    } catch (e) {
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_reportErrorMessage(t, e))),
-      );
-    } finally {
-      detailsCtrl.dispose();
-
-      if (mounted) {
-        setState(() {
-          _reporting = false;
-        });
-      }
-    }
+    });
   }
 
   Future<void> _openProfile(DiscoveryProfile profile) async {
@@ -549,7 +461,19 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
   }
 
   Future<void> _handleNope() async {
-    _removeCurrent();
+    if (!_hasCurrent || _liking) return;
+
+    _startSwipeFeedback(_SwipeFeedbackType.nope);
+    await _waitForSwipeFeedback();
+
+    if (!mounted) return;
+
+    setState(() {
+      _swipeFeedback = null;
+      _swipeFeedbackProgress = 0;
+      _dragOffsetX = 0;
+      _removeCurrentWithoutSetState();
+    });
   }
 
   void _showQuotaPaywallHint() {
@@ -716,6 +640,20 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
     setState(() {
       _liking = true;
+    });
+
+    _startSwipeFeedback(
+      superLike ? _SwipeFeedbackType.superLike : _SwipeFeedbackType.like,
+    );
+
+    await _waitForSwipeFeedback();
+
+    if (!mounted) return;
+
+    setState(() {
+      _swipeFeedback = null;
+      _swipeFeedbackProgress = 0;
+      _dragOffsetX = 0;
       _removeCurrentWithoutSetState();
     });
 
@@ -731,6 +669,8 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       ]);
 
       if (!mounted) return;
+
+      _triggerFloatingParticles(superLike: superLike);
 
       if (result.matched && result.conversationId != null) {
         await _showMatchDialog(
@@ -764,6 +704,9 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       if (mounted) {
         setState(() {
           _liking = false;
+          _swipeFeedback = null;
+          _swipeFeedbackProgress = 0;
+          _dragOffsetX = 0;
         });
       }
     }
@@ -775,50 +718,123 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     required String otherUserId,
     String? otherAvatarUrl,
   }) async {
-    final t = AppStrings.of(context);
+    await Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        opaque: true,
+        barrierDismissible: false,
+        pageBuilder: (routeContext, animation, secondaryAnimation) {
+          return MatchCelebrationScreen(
+            otherName: otherName,
+            otherAvatarUrl: otherAvatarUrl,
+            onOpenChat: () {
+              Navigator.of(routeContext).pop();
+              Navigator.pushNamed(
+                context,
+                '/chat',
+                arguments: {
+                  'conversationId': conversationId,
+                  'otherUserId': otherUserId,
+                  'otherDisplayName': otherName,
+                  'otherAvatarUrl': otherAvatarUrl,
+                },
+              );
+            },
+          );
+        },
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          final curved = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutBack,
+          );
 
-    await showDialog(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: Row(
-            children: [
-              const AppLogo(size: 24),
-              const SizedBox(width: 8),
-              Text(
-                t.isGerman
-                    ? "It's a Match! 🎉"
-                    : t.isThai
-                        ? 'แมตช์แล้ว! 🎉'
-                        : "It's a Match! 🎉",
+          return FadeTransition(
+            opacity: curved,
+            child: ScaleTransition(
+              scale: Tween<double>(begin: 0.88, end: 1.0).animate(curved),
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: RadialGradient(
+                            center: Alignment.center,
+                            radius: 0.9,
+                            colors: [
+                              Colors.pinkAccent.withValues(alpha: 0.20 * animation.value,),
+                              const Color(0xFFFFB300).withValues(alpha: 0.12 * animation.value,),
+                              Colors.transparent,
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  child,
+                ],
               ),
-            ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildFloatingParticlesOverlay() {
+    final show = _showLikeParticles || _showSuperParticles;
+    if (!show) return const SizedBox.shrink();
+
+    final isSuper = _showSuperParticles;
+    final color = isSuper ? const Color(0xFFFFB300) : Colors.pinkAccent;
+    final icon = isSuper ? Icons.auto_awesome_rounded : Icons.favorite_rounded;
+
+    final particles = List<Widget>.generate(9, (index) {
+      final left = 0.18 + (index % 5) * 0.16;
+      final delay = index * 0.035;
+      final size = isSuper ? 18.0 + (index % 3) * 7 : 16.0 + (index % 4) * 6;
+      final drift = (index.isEven ? -1 : 1) * (18.0 + index * 3.0);
+
+      return Positioned.fill(
+        child: TweenAnimationBuilder<double>(
+          tween: Tween<double>(begin: 0, end: 1),
+          duration: Duration(milliseconds: 620 + index * 35),
+          curve: Curves.easeOutCubic,
+          builder: (context, value, child) {
+            final adjusted = (value - delay).clamp(0.0, 1.0);
+            final opacity = (1.0 - adjusted).clamp(0.0, 1.0);
+            final y = 145.0 * adjusted;
+            final x = drift * adjusted;
+
+            return Align(
+              alignment: Alignment(
+                (left * 2) - 1,
+                0.38,
+              ),
+              child: Transform.translate(
+                offset: Offset(x, -y),
+                child: Transform.scale(
+                  scale: 0.55 + adjusted * 0.75,
+                  child: Opacity(
+                    opacity: opacity,
+                    child: child,
+                  ),
+                ),
+              ),
+            );
+          },
+          child: Icon(
+            icon,
+            color: color.withValues(alpha: isSuper ? 0.92 : 0.86),
+            size: size,
           ),
-          content: Text(t.itsAMatch(otherName)),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text(t.continueSwiping),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(ctx);
-                Navigator.pushNamed(
-                  context,
-                  '/chat',
-                  arguments: {
-                    'conversationId': conversationId,
-                    'otherUserId': otherUserId,
-                    'otherDisplayName': otherName,
-                    'otherAvatarUrl': otherAvatarUrl,
-                  },
-                );
-              },
-              child: Text(t.chatOpen),
-            ),
-          ],
-        );
-      },
+        ),
+      );
+    });
+
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: Stack(children: particles),
+      ),
     );
   }
 
@@ -829,15 +845,227 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
         color: left
-            ? Colors.red.withOpacity(0.15)
-            : Colors.green.withOpacity(0.15),
+            ? Colors.red.withValues(alpha: 0.14)
+            : Colors.pinkAccent.withValues(alpha: 0.18),
       ),
       alignment: left ? Alignment.centerLeft : Alignment.centerRight,
       child: Icon(
         left ? Icons.close_rounded : Icons.favorite_rounded,
         size: 44,
-        color: left ? Colors.red : Colors.green,
+        color: left ? Colors.red : Colors.pinkAccent,
       ),
+    );
+  }
+
+  Widget _buildDecisionOverlay() {
+    final type = _swipeFeedback;
+    if (type == null) return const SizedBox.shrink();
+
+    final progress = _swipeFeedbackProgress.clamp(0.0, 1.0);
+    if (progress <= 0) return const SizedBox.shrink();
+
+    final isNope = type == _SwipeFeedbackType.nope;
+    final isSuper = type == _SwipeFeedbackType.superLike;
+
+    final color = isNope
+        ? Colors.red
+        : isSuper
+            ? const Color(0xFFFFB300)
+            : Colors.pinkAccent;
+    final icon = isNope
+        ? Icons.close_rounded
+        : isSuper
+            ? Icons.auto_awesome_rounded
+            : Icons.favorite_rounded;
+
+    final label = isNope
+        ? 'NOPE'
+        : isSuper
+            ? 'SUPER LIKE'
+            : 'LIKE';
+
+    final sideAlignment = isNope ? Alignment.centerLeft : Alignment.centerRight;
+    final gradientBegin = isNope ? Alignment.centerRight : Alignment.centerLeft;
+    final gradientEnd = isNope ? Alignment.centerLeft : Alignment.centerRight;
+
+    final colorOpacity = (0.10 + (progress * 0.55)).clamp(0.0, 0.65);
+    final widthFactor = (0.20 + (progress * 0.80)).clamp(0.20, 1.0);
+    final badgeOpacity = (progress * 1.65).clamp(0.0, 1.0);
+    final badgeScale = (0.78 + (progress * 0.52)).clamp(0.78, 1.30);
+    final borderWidth = (2.4 + (progress * 3.2)).clamp(2.4, 5.6);
+    final blur = (12.0 + (progress * 36.0)).clamp(12.0, 48.0);
+
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(24),
+          child: Stack(
+            children: [
+              Align(
+                alignment: sideAlignment,
+                child: FractionallySizedBox(
+                  widthFactor: widthFactor,
+                  heightFactor: 1,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 70),
+                    curve: Curves.easeOut,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: gradientBegin,
+                        end: gradientEnd,
+                        colors: [
+                          Colors.transparent,
+                          color.withValues(alpha: colorOpacity * 0.45),
+                          color.withValues(alpha: colorOpacity),
+                        ],
+                        stops: const [0.0, 0.52, 1.0],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              if (!isNope && !isSuper)
+                Center(
+                  child: AnimatedOpacity(
+                    opacity: (progress * 1.35).clamp(0.0, 1.0),
+                    duration: const Duration(milliseconds: 70),
+                    child: Transform.scale(
+                      scale: (0.55 + (progress * 0.85)).clamp(0.55, 1.40),
+                      child: Icon(
+                        Icons.favorite_rounded,
+                        color: Colors.pinkAccent.withValues(alpha: (0.22 + progress * 0.55).clamp(0.22, 0.77),),
+                        size: 190,
+                      ),
+                    ),
+                  ),
+                ),
+              if (isSuper)
+                Center(
+                  child: AnimatedOpacity(
+                    opacity: (progress * 1.4).clamp(0.0, 1.0),
+                    duration: const Duration(milliseconds: 70),
+                    child: Transform.scale(
+                      scale: (0.62 + (progress * 0.92)).clamp(0.62, 1.55),
+                      child: Container(
+                        width: 210,
+                        height: 210,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: RadialGradient(
+                            colors: [
+                              const Color(0xFFFFF3C4).withValues(alpha: 0.95),
+                              const Color(0xFFFFB300).withValues(alpha: 0.65),
+                              Colors.transparent,
+                            ],
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFFFFB300).withValues(alpha: 0.55),
+                              blurRadius: 52,
+                              spreadRadius: 10,
+                            ),
+                          ],
+                        ),
+                        child: const Center(
+                          child: Icon(
+                            Icons.auto_awesome_rounded,
+                            color: Color(0xFFFF9800),
+                            size: 110,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              Positioned(
+                top: 34,
+                left: isNope ? 22 : null,
+                right: isNope ? null : 22,
+                child: AnimatedOpacity(
+                  opacity: badgeOpacity,
+                  duration: const Duration(milliseconds: 70),
+                  child: Transform.rotate(
+                    angle: isNope ? -0.20 : 0.20,
+                    child: Transform.scale(
+                      scale: badgeScale,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 22,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.92),
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(
+                            color: color.withValues(alpha: 0.98),
+                            width: borderWidth,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: color.withValues(alpha: 0.26),
+                              blurRadius: blur,
+                              offset: const Offset(0, 8),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              icon,
+                              size: 32,
+                              color: color,
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              label,
+                              style: TextStyle(
+                                color: color,
+                                fontSize: 25,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.4,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              if (progress > 0.18)
+                Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: color.withValues(alpha: 
+                          ((progress - 0.18) * 0.60).clamp(0.0, 0.38),
+                        ),
+                        width: 5,
+                      ),
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfileCardWithFeedback(
+    DiscoveryProfile profile, {
+    double parallaxOffset = 0,
+  }) {
+    return Stack(
+      children: [
+        _ProfileCard(
+          profile: profile,
+          parallaxOffset: parallaxOffset,
+        ),
+        _buildDecisionOverlay(),
+      ],
     );
   }
 
@@ -847,33 +1075,127 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     required String label,
     required Future<void> Function()? onTap,
   }) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        InkResponse(
-          onTap: onTap == null ? null : () => onTap(),
-          radius: 34,
-          child: CircleAvatar(
-            radius: 28,
-            backgroundColor:
-                Colors.white.withOpacity(onTap == null ? 0.5 : 0.9),
-            child: customIcon ??
-                Icon(
-                  icon,
-                  size: 28,
-                  color: onTap == null ? Colors.black26 : AppColors.primary,
+    final enabled = onTap != null;
+    final lowerLabel = label.toLowerCase();
+    final isNope = lowerLabel.contains('no') ||
+        lowerLabel.contains('nein') ||
+        lowerLabel.contains('ไม่');
+    final isSuper = lowerLabel.contains('super') ||
+        lowerLabel.contains('ซูเปอร์');
+    final color = isNope
+        ? Colors.redAccent
+        : isSuper
+            ? const Color(0xFFFFB300)
+            : Colors.pinkAccent;
+    final size = isSuper ? 62.0 : 68.0;
+
+    var pressed = false;
+
+    return StatefulBuilder(
+      builder: (context, setButtonState) {
+        Future<void> handleTap() async {
+          if (!enabled || onTap == null) return;
+
+          setButtonState(() {
+            pressed = true;
+          });
+
+          await Future<void>.delayed(const Duration(milliseconds: 90));
+
+          if (context.mounted) {
+            setButtonState(() {
+              pressed = false;
+            });
+          }
+
+          await onTap();
+        }
+
+        return Tooltip(
+          message: label,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapDown: enabled
+                ? (_) {
+                    setButtonState(() {
+                      pressed = true;
+                    });
+                  }
+                : null,
+            onTapCancel: enabled
+                ? () {
+                    setButtonState(() {
+                      pressed = false;
+                    });
+                  }
+                : null,
+            onTapUp: enabled
+                ? (_) {
+                    setButtonState(() {
+                      pressed = false;
+                    });
+                  }
+                : null,
+            onTap: enabled ? handleTap : null,
+            child: AnimatedScale(
+              scale: !enabled
+                  ? 0.92
+                  : pressed
+                      ? 0.86
+                      : 1.0,
+              duration: const Duration(milliseconds: 140),
+              curve: Curves.easeOutBack,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOutCubic,
+                width: size,
+                height: size,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withValues(alpha: enabled ? 0.96 : 0.46),
+                  border: Border.all(
+                    color: color.withValues(alpha: enabled ? 0.28 : 0.10),
+                    width: pressed ? 2.2 : 1.4,
+                  ),
+                  boxShadow: [
+                    if (enabled)
+                      BoxShadow(
+                        color: color.withValues(alpha: pressed
+                              ? (isSuper ? 0.56 : 0.38)
+                              : (isSuper ? 0.38 : 0.24),),
+                        blurRadius: pressed
+                            ? (isSuper ? 42 : 32)
+                            : (isSuper ? 30 : 22),
+                        spreadRadius: pressed
+                            ? (isSuper ? 8 : 5)
+                            : (isSuper ? 4 : 1),
+                        offset: const Offset(0, 8),
+                      ),
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: pressed ? 0.12 : 0.08),
+                      blurRadius: pressed ? 24 : 18,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
                 ),
+                child: Center(
+                  child: AnimatedScale(
+                    scale: pressed ? 1.18 : 1.0,
+                    duration: const Duration(milliseconds: 140),
+                    curve: Curves.easeOutBack,
+                    child: customIcon ??
+                        Icon(
+                          icon,
+                          size: isSuper ? 28 : 32,
+                          color: enabled ? color : Colors.black26,
+                        ),
+                  ),
+                ),
+              ),
+            ),
           ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.black.withOpacity(onTap == null ? 0.35 : 0.75),
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
+        );
+      },
     );
   }
 
@@ -898,17 +1220,17 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                Colors.orange.withOpacity(0.18),
-                Colors.pink.withOpacity(0.10),
+                Colors.orange.withValues(alpha: 0.18),
+                Colors.pink.withValues(alpha: 0.10),
               ],
             ),
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
-              color: Colors.orange.withOpacity(0.24),
+              color: Colors.orange.withValues(alpha: 0.24),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.orange.withOpacity(0.10),
+                color: Colors.orange.withValues(alpha: 0.10),
                 blurRadius: 16,
                 offset: const Offset(0, 4),
               ),
@@ -920,7 +1242,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.84),
+                  color: Colors.white.withValues(alpha: 0.84),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
@@ -944,7 +1266,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                     Text(
                       _almostOutSubtitle(t),
                       style: TextStyle(
-                        color: Colors.black.withOpacity(0.72),
+                        color: Colors.black.withValues(alpha: 0.72),
                         fontWeight: FontWeight.w700,
                         height: 1.3,
                       ),
@@ -998,9 +1320,9 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.04),
+          color: Colors.black.withValues(alpha: 0.04),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.black.withOpacity(0.06)),
+          border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
         ),
         child: Row(
           children: [
@@ -1013,7 +1335,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
               child: Text(
                 text,
                 style: TextStyle(
-                  color: Colors.black.withOpacity(0.74),
+                  color: Colors.black.withValues(alpha: 0.74),
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -1077,33 +1399,71 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                 ),
               ),
             )
-          : Dismissible(
-              key: ValueKey(
-                'profile_${profile.userId}_${profile.displayName}_$_index',
-              ),
-              direction:
-                  _liking ? DismissDirection.none : DismissDirection.horizontal,
-              confirmDismiss: (dir) async {
-                if (_liking) return false;
+          : Stack(
+              alignment: Alignment.center,
+              children: [
+                if (_nextProfile != null)
+                  Positioned.fill(
+                    top: 14 - (_dragOffsetX.abs() * 10),
+                    left: 12 - (_dragOffsetX.abs() * 6),
+                    right: 12 - (_dragOffsetX.abs() * 6),
+                    child: Transform.scale(
+                      scale: 0.955 + (_dragOffsetX.abs() * 0.035),
+                      child: Opacity(
+                        opacity: 0.70 + (_dragOffsetX.abs() * 0.18),
+                        child: IgnorePointer(
+                          child: _ProfileCard(
+                            profile: _nextProfile!,
+                            parallaxOffset: -_dragOffsetX * 8,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                Dismissible(
+                  key: ValueKey(
+                    'profile_${profile.userId}_${profile.displayName}_$_index',
+                  ),
+                  direction: _liking
+                      ? DismissDirection.none
+                      : DismissDirection.horizontal,
+                  onUpdate: _updateSwipeFeedback,
+                  confirmDismiss: (dir) async {
+                    if (_liking) return false;
 
-                if (dir == DismissDirection.endToStart) {
-                  await _handleNope();
-                  return false;
-                }
+                    if (dir == DismissDirection.endToStart) {
+                      await _handleNope();
+                      return false;
+                    }
 
-                if (dir == DismissDirection.startToEnd) {
-                  await _handleLike(superLike: false);
-                  return false;
-                }
+                    if (dir == DismissDirection.startToEnd) {
+                      await _handleLike(superLike: false);
+                      return false;
+                    }
 
-                return false;
-              },
-              background: _swipeBg(left: false),
-              secondaryBackground: _swipeBg(left: true),
-              child: GestureDetector(
-                onTap: () => _openProfile(profile),
-                child: _ProfileCard(profile: profile),
-              ),
+                    _clearSwipeFeedback();
+                    return false;
+                  },
+                  onResize: _clearSwipeFeedback,
+                  background: _swipeBg(left: false),
+                  secondaryBackground: _swipeBg(left: true),
+                  child: GestureDetector(
+                    onTap: () => _openProfile(profile),
+                    child: AnimatedRotation(
+                      duration: const Duration(milliseconds: 90),
+                      turns: _dragOffsetX * 0.030,
+                      child: AnimatedScale(
+                        duration: const Duration(milliseconds: 90),
+                        scale: 1 - (_dragOffsetX.abs() * 0.018),
+                        child: _buildProfileCardWithFeedback(
+                          profile,
+                          parallaxOffset: _dragOffsetX * 16,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
     );
   }
@@ -1112,7 +1472,6 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
   Widget build(BuildContext context) {
     final user = _supa.auth.currentUser;
     final t = AppStrings.of(context);
-    final currentProfile = _currentProfile;
 
     if (user == null) {
       return Scaffold(
@@ -1152,7 +1511,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
             icon: const Icon(Icons.home_rounded),
             onPressed: _goHome,
           ),
-          if (_liking || _reporting)
+          if (_liking)
             const Padding(
               padding: EdgeInsets.only(right: 8),
               child: Center(
@@ -1164,7 +1523,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
               ),
             ),
           IconButton(
-            onPressed: _loading || _liking || _reporting ? null : _refreshScreen,
+            onPressed: _loading || _liking ? null : _refreshScreen,
             icon: const Icon(Icons.refresh),
             tooltip: t.isGerman
                 ? 'Neu laden'
@@ -1183,8 +1542,10 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
           ),
         ),
         child: SafeArea(
-          child: Column(
+          child: Stack(
             children: [
+              Column(
+                children: [
               const SizedBox(height: 8),
               if (_loading) ...[
                 const LinearProgressIndicator(minHeight: 2),
@@ -1245,10 +1606,10 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                           const SizedBox(height: 10),
                           Text(
                             t.isGerman
-                                ? 'Keine Profile gefunden.\n(Alle verfügbaren Profile sind schon geliked, gematched, gemeldet oder blockiert.)'
+                                ? 'Keine Profile gefunden.\n(Alle verfügbaren Profile sind schon geliked, gematched oder blockiert.)'
                                 : t.isThai
-                                    ? 'ไม่พบโปรไฟล์\n(โปรไฟล์ที่มีอยู่ถูกไลก์ แมตช์ รายงาน หรือบล็อกไปแล้ว)'
-                                    : 'No profiles found.\n(All available profiles are already liked, matched, reported, or blocked.)',
+                                    ? 'ไม่พบโปรไฟล์\n(โปรไฟล์ที่มีอยู่ถูกไลก์ แมตช์ หรือบล็อกไปแล้ว)'
+                                    : 'No profiles found.\n(All available profiles are already liked, matched, or blocked.)',
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 12),
@@ -1299,28 +1660,12 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                       _roundActionButton(
                         icon: Icons.close_rounded,
                         label: t.nope,
-                        onTap: (_hasCurrent && !_liking && !_reporting)
-                            ? _handleNope
-                            : null,
-                      ),
-                      _roundActionButton(
-                        icon: Icons.flag_rounded,
-                        label: t.isGerman
-                            ? 'Melden'
-                            : t.isThai
-                                ? 'รายงาน'
-                                : 'Report',
-                        onTap: (_hasCurrent &&
-                                !_liking &&
-                                !_reporting &&
-                                currentProfile != null)
-                            ? () => _openReportDialog(currentProfile)
-                            : null,
+                        onTap: (_hasCurrent && !_liking) ? _handleNope : null,
                       ),
                       _roundActionButton(
                         icon: Icons.favorite_rounded,
                         label: t.like,
-                        onTap: (_hasCurrent && !_liking && !_reporting)
+                        onTap: (_hasCurrent && !_liking)
                             ? () => _handleLike(superLike: false)
                             : null,
                       ),
@@ -1331,7 +1676,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                             : t.isThai
                                 ? 'ซูเปอร์'
                                 : 'Super',
-                        onTap: (_hasCurrent && !_liking && !_reporting)
+                        onTap: (_hasCurrent && !_liking)
                             ? () => _handleLike(superLike: true)
                             : null,
                       ),
@@ -1339,6 +1684,9 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                   ),
                 ),
               ],
+                ],
+              ),
+              _buildFloatingParticlesOverlay(),
             ],
           ),
         ),
@@ -1349,8 +1697,12 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
 
 class _ProfileCard extends StatelessWidget {
   final DiscoveryProfile profile;
+  final double parallaxOffset;
 
-  const _ProfileCard({required this.profile});
+  const _ProfileCard({
+    required this.profile,
+    this.parallaxOffset = 0,
+  });
 
   String? _partnerLabel(String? raw, AppStrings t) {
     switch ((raw ?? '').trim().toLowerCase()) {
@@ -1439,13 +1791,46 @@ class _ProfileCard extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             if (hasNetwork)
-              Image.network(
-                img,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => _buildFallbackImage(),
+              Transform.translate(
+                offset: Offset(parallaxOffset, 0),
+                child: Transform.scale(
+                  scale: 1.06,
+                  child: Image.network(
+                    img,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => _buildFallbackImage(),
+                  ),
+                ),
               )
             else
               _buildFallbackImage(),
+            Align(
+              alignment: Alignment.topCenter,
+              child: IgnorePointer(
+                child: AnimatedOpacity(
+                  opacity: parallaxOffset.abs() > 1 ? 0.34 : 0.0,
+                  duration: const Duration(milliseconds: 120),
+                  child: Container(
+                    height: 120,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: parallaxOffset >= 0
+                            ? Alignment.centerLeft
+                            : Alignment.centerRight,
+                        end: parallaxOffset >= 0
+                            ? Alignment.centerRight
+                            : Alignment.centerLeft,
+                        colors: [
+                          Colors.transparent,
+                          Colors.white.withValues(alpha: 0.20),
+                          Colors.transparent,
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
             const Align(
               alignment: Alignment.bottomCenter,
               child: DecoratedBox(
@@ -1465,7 +1850,7 @@ class _ProfileCard extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.45),
+                  color: Colors.black.withValues(alpha: 0.45),
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: Row(
@@ -1513,19 +1898,19 @@ class _ProfileCard extends StatelessWidget {
                   if (profile.isGold)
                     _topBadge(
                       text: 'GOLD',
-                      bg: Colors.amber.withOpacity(0.92),
+                      bg: Colors.amber.withValues(alpha: 0.92),
                       fg: Colors.black,
                     )
                   else if (profile.isPremium)
                     _topBadge(
                       text: 'PREMIUM',
-                      bg: Colors.pink.withOpacity(0.92),
+                      bg: Colors.pink.withValues(alpha: 0.92),
                       fg: Colors.white,
                     ),
                   if (desiredPartner != null)
                     _topBadge(
                       text: desiredPartner,
-                      bg: Colors.white.withOpacity(0.92),
+                      bg: Colors.white.withValues(alpha: 0.92),
                       fg: Colors.black87,
                     ),
                 ],
@@ -1550,7 +1935,7 @@ class _ProfileCard extends StatelessWidget {
                     Text(
                       subtitleParts.join(' • '),
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Colors.white.withOpacity(0.92),
+                            color: Colors.white.withValues(alpha: 0.92),
                           ),
                     ),
                   if (job.isNotEmpty) ...[
@@ -1558,7 +1943,7 @@ class _ProfileCard extends StatelessWidget {
                     Text(
                       job,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Colors.white.withOpacity(0.9),
+                            color: Colors.white.withValues(alpha: 0.9),
                           ),
                     ),
                   ],
@@ -1575,10 +1960,10 @@ class _ProfileCard extends StatelessWidget {
                                 vertical: 6,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.16),
+                                color: Colors.white.withValues(alpha: 0.16),
                                 borderRadius: BorderRadius.circular(999),
                                 border: Border.all(
-                                  color: Colors.white.withOpacity(0.24),
+                                  color: Colors.white.withValues(alpha: 0.24),
                                 ),
                               ),
                               child: Text(
@@ -1602,7 +1987,7 @@ class _ProfileCard extends StatelessWidget {
                             ? 'แตะที่การ์ดเพื่อดูโปรไฟล์'
                             : 'Tap the card to view the profile',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.white.withOpacity(0.85),
+                          color: Colors.white.withValues(alpha: 0.85),
                         ),
                   ),
                 ],

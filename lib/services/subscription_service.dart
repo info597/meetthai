@@ -18,6 +18,12 @@ class SubscriptionService {
   static const String betaTesterCode = 'MEETTHAI-TESTER';
   static const String betaTesterPromoType = 'beta_tester';
 
+  static const String premiumSixMonthCode = 'PREMIUM-DANY-6M';
+  static const String goldSixMonthCode = 'GOLD-DANY-6M';
+
+  static const String premiumSixMonthPromoType = 'manual_premium_6m';
+  static const String goldSixMonthPromoType = 'manual_gold_6m';
+
   bool _initialized = false;
   bool _available = false;
   String? _configuredPublicKey;
@@ -154,10 +160,42 @@ class SubscriptionService {
     await refreshAndSync();
   }
 
+  Future<bool> activatePromoCode(String enteredCode) async {
+    await _ensureInitialized();
+
+    final code = _cleanPromoCode(enteredCode);
+
+    if (code == betaTesterCode) {
+      return activateBetaTesterCode(code);
+    }
+
+    if (code == premiumSixMonthCode) {
+      await _grantManualPromo(
+        planCode: 'premium',
+        isPremium: true,
+        isGold: false,
+        promoType: premiumSixMonthPromoType,
+      );
+      return true;
+    }
+
+    if (code == goldSixMonthCode) {
+      await _grantManualPromo(
+        planCode: 'gold',
+        isPremium: true,
+        isGold: true,
+        promoType: goldSixMonthPromoType,
+      );
+      return true;
+    }
+
+    return false;
+  }
+
   Future<bool> activateBetaTesterCode(String enteredCode) async {
     await _ensureInitialized();
 
-    final code = enteredCode.trim().toUpperCase();
+    final code = _cleanPromoCode(enteredCode);
     final expectedCode = betaTesterCode.trim().toUpperCase();
 
     if (code != expectedCode) {
@@ -179,7 +217,7 @@ class SubscriptionService {
           'is_premium': true,
           'is_gold': true,
           'plan_code': 'gold',
-          'billing_period': null,
+          'billing_period': 'beta',
           'subscription_source': 'beta',
           'subscription_status': 'active',
           'subscription_expires_at': null,
@@ -198,6 +236,59 @@ class SubscriptionService {
     return true;
   }
 
+  Future<void> _grantManualPromo({
+    required String planCode,
+    required bool isPremium,
+    required bool isGold,
+    required String promoType,
+  }) async {
+    final supa = Supabase.instance.client;
+    final user = supa.auth.currentUser;
+
+    if (user == null) {
+      throw Exception('Du musst eingeloggt sein, um diesen Code zu nutzen.');
+    }
+
+    await SupabaseService.instance.ensureProfileExists();
+
+    final expiresAt = DateTime.now().toUtc().add(const Duration(days: 183));
+
+    await supa
+        .from('profiles')
+        .update({
+          'is_premium': isPremium,
+          'is_gold': isGold,
+          'plan_code': planCode,
+          'billing_period': 'promo_6m',
+          'subscription_source': 'promo',
+          'subscription_status': 'active',
+          'subscription_expires_at': expiresAt.toIso8601String(),
+          'revenuecat_app_user_id': user.id,
+          'promo_granted': true,
+          'promo_type': promoType,
+          'promo_awarded_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('user_id', user.id);
+
+    await SubscriptionState.instance.refreshFromSupabase();
+    await SubscriptionState.instance.refresh();
+
+    debugPrint('[SubscriptionService] Promo freigeschaltet: $promoType');
+  }
+
+  String _cleanPromoCode(String value) {
+    final raw = value.trim();
+
+    final uri = Uri.tryParse(raw);
+    final queryCode = uri?.queryParameters['code'];
+
+    if (queryCode != null && queryCode.trim().isNotEmpty) {
+      return queryCode.trim().toUpperCase();
+    }
+
+    return raw.toUpperCase();
+  }
+
   Future<void> refreshAndSync() async {
     await _ensureInitialized();
 
@@ -209,15 +300,29 @@ class SubscriptionService {
       return;
     }
 
-    if (kIsWeb || !_available) {
-      await SubscriptionState.instance.refreshFromSupabase();
-      return;
-    }
-
     try {
       await SupabaseService.instance.ensureProfileExists();
 
       final existingProfile = await _loadExistingProfile(user.id);
+
+      final expiredPromo = _isExpiredPromo(existingProfile);
+      if (expiredPromo) {
+        debugPrint('[SubscriptionService] Promo abgelaufen -> setze FREE');
+
+        await _syncFreePlan(
+          supa: supa,
+          userId: user.id,
+        );
+
+        await SubscriptionState.instance.refreshFromSupabase();
+        await SubscriptionState.instance.refresh();
+        return;
+      }
+
+      if (kIsWeb || !_available) {
+        await SubscriptionState.instance.refreshFromSupabase();
+        return;
+      }
 
       CustomerInfo info = await Purchases.getCustomerInfo();
       await Future.delayed(const Duration(milliseconds: 250));
@@ -337,6 +442,39 @@ class SubscriptionService {
     }
   }
 
+  bool _isExpiredPromo(Map<String, dynamic>? profile) {
+    if (profile == null) return false;
+
+    final subscriptionSource = (profile['subscription_source'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+
+    final promoGranted = profile['promo_granted'] == true;
+
+    final promoType = (profile['promo_type'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+
+    final hasPromoMarker =
+        subscriptionSource == 'promo' ||
+        promoGranted ||
+        promoType == premiumSixMonthPromoType ||
+        promoType == goldSixMonthPromoType ||
+        promoType == promoTypeFemaleFreelancerFirst100;
+
+    if (!hasPromoMarker) return false;
+
+    final expiresAt = _parseDate(
+      (profile['subscription_expires_at'] ?? '').toString(),
+    );
+
+    if (expiresAt == null) return false;
+
+    return DateTime.now().toUtc().isAfter(expiresAt);
+  }
+
   bool _shouldKeepPromo(Map<String, dynamic>? profile) {
     if (profile == null) return false;
 
@@ -364,6 +502,14 @@ class SubscriptionService {
         .trim()
         .toLowerCase();
 
+    final expiresAt = _parseDate(
+      (profile['subscription_expires_at'] ?? '').toString(),
+    );
+
+    if (expiresAt != null && DateTime.now().toUtc().isAfter(expiresAt)) {
+      return false;
+    }
+
     final isBetaTester =
         promoType == betaTesterPromoType ||
         subscriptionSource == 'beta' ||
@@ -378,19 +524,16 @@ class SubscriptionService {
     }
 
     final hasKnownPromoType =
-        promoType == promoTypeFemaleFreelancerFirst100;
+        promoType == promoTypeFemaleFreelancerFirst100 ||
+        promoType == premiumSixMonthPromoType ||
+        promoType == goldSixMonthPromoType;
 
     final hasPromoMarkers =
         promoGranted ||
         hasKnownPromoType ||
         subscriptionSource == 'promo' ||
-        billingPeriod == 'promo';
-
-    final looksLikePromoPremium =
-        !isGold &&
-        planCode == 'premium' &&
-        isPremium &&
-        hasPromoMarkers;
+        billingPeriod == 'promo' ||
+        billingPeriod == 'promo_6m';
 
     final promoStatusAllowed =
         subscriptionStatus.isEmpty ||
@@ -398,7 +541,13 @@ class SubscriptionService {
         subscriptionStatus == 'promo' ||
         subscriptionStatus == 'granted';
 
-    return looksLikePromoPremium && promoStatusAllowed;
+    final looksLikePremiumPromo =
+        planCode == 'premium' && isPremium && !isGold && hasPromoMarkers;
+
+    final looksLikeGoldPromo =
+        planCode == 'gold' && isPremium && isGold && hasPromoMarkers;
+
+    return (looksLikePremiumPromo || looksLikeGoldPromo) && promoStatusAllowed;
   }
 
   Future<void> _syncRevenueCatPlan({
@@ -457,9 +606,11 @@ class SubscriptionService {
     final p = (productId ?? '').trim().toLowerCase();
 
     if (p.isEmpty) return null;
+    if (p.contains('halfyear')) return 'semiannual';
     if (p.contains('semi')) return 'semiannual';
     if (p.contains('year')) return 'yearly';
     if (p.contains('month')) return 'monthly';
+    if (p == 'meethai_premium' || p == 'meethai_gold') return 'monthly';
 
     return null;
   }

@@ -84,118 +84,44 @@ serve(async (req) => {
       );
     }
 
-    const apiUser = Deno.env.get("SIGHTENGINE_API_USER");
-    const apiSecret = Deno.env.get("SIGHTENGINE_API_SECRET");
-
-    if (!apiUser || !apiSecret) {
-      return new Response(
-        JSON.stringify({
-          allowed: false,
-          nudityScore: 1,
-          reason: "Sightengine credentials missing",
-        }),
-        { status: 500, headers: { "Content-Type": "application/json" } },
-      );
-    }
-
     const body = await req.json();
-    const media = body.media;
 
-    if (!media || typeof media !== "string") {
+    const texts: string[] = [];
+
+    if (Array.isArray(body.texts)) {
+      for (const item of body.texts) {
+        texts.push(String(item ?? ""));
+      }
+    } else {
+      texts.push(String(body.text ?? ""));
+    }
+
+    const joinedText = texts.join(" ").trim();
+
+    if (joinedText.length === 0) {
       return new Response(
-        JSON.stringify({
-          allowed: false,
-          nudityScore: 1,
-          reason: "Missing media",
-        }),
-        { status: 400, headers: { "Content-Type": "application/json" } },
+        JSON.stringify({ allowed: true, reason: "Empty text allowed" }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
       );
     }
 
-    const formData = new FormData();
-    formData.append("models", "nudity-2.0,text-content");
-    formData.append("api_user", apiUser);
-    formData.append("api_secret", apiSecret);
-    formData.append("media", media);
-
-    const response = await fetch("https://api.sightengine.com/1.0/check.json", {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!response.ok) {
+    if (containsContactInfo(joinedText)) {
       return new Response(
         JSON.stringify({
-          allowed: true,
-          nudityScore: 0,
-          reason: "Sightengine API error - allowed during test",
+          allowed: false,
+          reason: "Contact or social media information detected",
+          debug: {
+            normalizedText: normalizeText(joinedText),
+          },
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     }
 
-    const data = await response.json();
-    const nudity = data?.nudity ?? {};
-    const textContent = data?.text ?? {};
-    const detectedText =
-      (textContent?.text ?? textContent?.content ?? "").toString();
-
-    const score = (key: string): number => {
-      const value = nudity?.[key];
-      return typeof value === "number" ? value : 0;
-    };
-
-    const sexualActivity = score("sexual_activity");
-    const sexualDisplay = score("sexual_display");
-    const erotica = score("erotica");
-    const verySuggestive = score("very_suggestive");
-    const suggestive = score("suggestive");
-
-    const strongestNudityScore = Math.max(
-      sexualActivity,
-      sexualDisplay,
-      erotica,
-      verySuggestive,
-      suggestive,
-    );
-
-    let allowed = true;
-    let reason = "OK";
-
-    if (sexualActivity >= 0.85) {
-      allowed = false;
-      reason = "Sexual activity detected";
-    } else if (sexualDisplay >= 0.9) {
-      allowed = false;
-      reason = "Sexual display detected";
-    } else if (erotica >= 0.95) {
-      allowed = false;
-      reason = "Erotica detected";
-    } else if (verySuggestive >= 0.98) {
-      allowed = false;
-      reason = "Very suggestive image detected";
-    } else if (
-      detectedText.trim().isNotEmpty &&
-      containsContactInfo(detectedText)
-    ) {
-      allowed = false;
-      reason = "Contact information detected in image";
-    }
-
     return new Response(
       JSON.stringify({
-        allowed,
-        nudityScore: strongestNudityScore,
-        reason,
-        debug: {
-          sexualActivity,
-          sexualDisplay,
-          erotica,
-          verySuggestive,
-          suggestive,
-          detectedText,
-          normalizedText: normalizeText(detectedText),
-        },
+        allowed: true,
+        reason: "OK",
       }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
@@ -203,8 +129,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         allowed: true,
-        nudityScore: 0,
-        reason: `Exception allowed during test: ${String(e)}`,
+        reason: `Error allowed during test: ${String(e)}`,
       }),
       { status: 200, headers: { "Content-Type": "application/json" } },
     );

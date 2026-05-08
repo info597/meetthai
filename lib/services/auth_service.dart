@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 
+import 'package:flutter/foundation.dart';
 class AuthService {
   static final _supa = Supabase.instance.client;
 
@@ -56,10 +57,10 @@ class AuthService {
     try {
       final info = await Purchases.logIn(userId);
 
-      print('[RC] Login synced: $userId');
-      print('[RC] created: ${info.created}');
+      debugPrint('[RC] Login synced: $userId');
+      debugPrint('[RC] created: ${info.created}');
     } catch (e) {
-      print('[RC] Login Fehler: $e');
+      debugPrint('[RC] Login Fehler: $e');
     }
   }
 }

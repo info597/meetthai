@@ -1,7 +1,7 @@
-import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -9,6 +9,7 @@ import 'i18n/app_strings.dart';
 import 'services/access_service.dart';
 import 'services/photo_moderation_service.dart';
 import 'services/profile_photos_service.dart';
+import 'services/profile_geo_service.dart';
 
 class ProfileEditScreen extends StatefulWidget {
   const ProfileEditScreen({super.key});
@@ -21,6 +22,10 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   final SupabaseClient _supabase = Supabase.instance.client;
 
   static const String _bucket = 'profile-photos';
+
+  static const double _minSearchRadiusKm = 1;
+  static const double _worldwideSearchRadiusKm = 20000;
+  static const int _searchRadiusDivisions = 19999;
 
   final _formKey = GlobalKey<FormState>();
 
@@ -39,6 +44,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   final _hobbiesCustomCtrl = TextEditingController();
 
   final _preferredOriginCountryCtrl = TextEditingController();
+  final _birthDateCtrl = TextEditingController();
 
   bool _isLoading = false;
   bool _isSavingProfile = false;
@@ -351,13 +357,23 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   }
 
   String get _searchRadiusLabel {
+    final isWorldwide = _searchRadiusKm >= _worldwideSearchRadiusKm;
+
     if (_t.isGerman) {
-      return 'Suchradius: ${_searchRadiusKm.round()} km';
+      return isWorldwide
+          ? 'Suchradius: Weltweit'
+          : 'Suchradius: ${_searchRadiusKm.round()} km';
     }
+
     if (_t.isThai) {
-      return 'ระยะค้นหา: ${_searchRadiusKm.round()} กม.';
+      return isWorldwide
+          ? 'ระยะค้นหา: ทั่วโลก'
+          : 'ระยะค้นหา: ${_searchRadiusKm.round()} กม.';
     }
-    return 'Search radius: ${_searchRadiusKm.round()} km';
+
+    return isWorldwide
+        ? 'Search radius: Worldwide'
+        : 'Search radius: ${_searchRadiusKm.round()} km';
   }
 
   String get _preferredPartnerSectionTitle {
@@ -400,6 +416,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     _aboutCtrl.dispose();
     _hobbiesCustomCtrl.dispose();
     _preferredOriginCountryCtrl.dispose();
+    _birthDateCtrl.dispose();
     super.dispose();
   }
 
@@ -588,6 +605,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         );
 
         _birthDate = parsedBirthDate;
+        _birthDateCtrl.text = _formatBirthDate(parsedBirthDate);
         _showPostalCode = row?['show_postal_code'] == true;
 
         _preferredAgeMin = preferredAgeMin.clamp(18, 99);
@@ -597,7 +615,10 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         _preferredHeightMax =
             preferredHeightMax.clamp(_preferredHeightMin, 250);
 
-        _searchRadiusKm = searchRadiusKm.clamp(1, 500);
+        _searchRadiusKm = searchRadiusKm.clamp(
+          _minSearchRadiusKm,
+          _worldwideSearchRadiusKm,
+        );
 
         _selectedLanguages
           ..clear()
@@ -814,77 +835,130 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   }
 
   Future<void> _openPhotoPreview(ProfilePhoto photo) async {
-    if (!mounted) return;
+    if (!mounted || _photos.isEmpty) return;
+
+    final initialIndex = _photos.indexWhere((item) => item.id == photo.id);
+    final pageController = PageController(
+      initialPage: initialIndex < 0 ? 0 : initialIndex,
+    );
 
     await showDialog<void>(
       context: context,
+      barrierColor: Colors.black,
       builder: (dialogContext) {
-        return Dialog(
-          insetPadding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(12),
-                ),
-                child: Image.network(
-                  photo.fullUrl,
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => Container(
-                    height: 260,
-                    color: Colors.grey.shade300,
-                    alignment: Alignment.center,
-                    child: const Icon(Icons.broken_image, size: 48),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
+        ProfilePhoto selectedPhoto =
+            initialIndex < 0 ? photo : _photos[initialIndex];
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return Dialog.fullscreen(
+              backgroundColor: Colors.black,
+              child: SafeArea(
+                child: Stack(
                   children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
+                    PageView.builder(
+                      controller: pageController,
+                      itemCount: _photos.length,
+                      onPageChanged: (index) {
+                        setDialogState(() {
+                          selectedPhoto = _photos[index];
+                        });
+                      },
+                      itemBuilder: (context, index) {
+                        final currentPhoto = _photos[index];
+
+                        return GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => Navigator.pop(dialogContext),
+                          child: Center(
+                            child: InteractiveViewer(
+                              minScale: 1,
+                              maxScale: 4,
+                              child: Image.network(
+                                currentPhoto.fullUrl,
+                                width: double.infinity,
+                                height: double.infinity,
+                                fit: BoxFit.contain,
+                                filterQuality: FilterQuality.medium,
+                                errorBuilder: (_, __, ___) => Container(
+                                  color: Colors.grey.shade900,
+                                  alignment: Alignment.center,
+                                  child: const Icon(
+                                    Icons.broken_image,
+                                    color: Colors.white,
+                                    size: 56,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    Positioned(
+                      left: 8,
+                      top: 8,
+                      child: IconButton(
+                        tooltip: _t.isGerman
+                            ? 'Zurück'
+                            : _t.isThai
+                                ? 'กลับ'
+                                : 'Back',
                         onPressed: () => Navigator.pop(dialogContext),
-                        icon: const Icon(Icons.close_rounded),
-                        label: Text(
-                          _t.isGerman
-                              ? 'Schließen'
-                              : _t.isThai
-                                  ? 'ปิด'
-                                  : 'Close',
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: Colors.white,
                         ),
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: ElevatedButton.icon(
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: IconButton(
+                        tooltip: _t.isGerman
+                            ? 'Löschen'
+                            : _t.isThai
+                                ? 'ลบ'
+                                : 'Delete',
                         onPressed: () async {
                           Navigator.pop(dialogContext);
-                          await _deletePhoto(photo);
+                          await _deletePhoto(selectedPhoto);
                         },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          foregroundColor: Colors.white,
+                        icon: const Icon(
+                          Icons.delete_rounded,
+                          color: Colors.white,
                         ),
-                        icon: const Icon(Icons.delete_rounded),
-                        label: Text(
+                      ),
+                    ),
+                    Positioned(
+                      left: 16,
+                      right: 16,
+                      bottom: 16,
+                      child: IgnorePointer(
+                        child: Text(
                           _t.isGerman
-                              ? 'Löschen'
+                              ? 'Tippen zum Schließen • Wischen für nächstes Bild'
                               : _t.isThai
-                                  ? 'ลบ'
-                                  : 'Delete',
+                                  ? 'แตะเพื่อปิด • ปัดเพื่อดูรูปถัดไป'
+                                  : 'Tap to close • Swipe for next photo',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ),
                   ],
                 ),
               ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
+
+    pageController.dispose();
   }
 
   Future<void> _deletePhoto(ProfilePhoto photo) async {
@@ -935,6 +1009,29 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     setState(() => _isLoading = true);
 
     try {
+      final imageUrl = photo.fullUrl;
+
+      if (imageUrl.isNotEmpty && imageUrl.contains('/object/public/')) {
+        try {
+          final uri = Uri.parse(imageUrl);
+          final marker = '/object/public/$_bucket/';
+          final index = uri.path.indexOf(marker);
+
+          if (index != -1) {
+            final storagePath = Uri.decodeComponent(
+              uri.path.substring(index + marker.length),
+            );
+
+            if (storagePath.isNotEmpty) {
+              await _supabase.storage.from(_bucket).remove([storagePath]);
+            }
+          }
+        } catch (_) {
+          // Alte/verwaiste Storage-Dateien sollen das Löschen des DB-Eintrags
+          // nicht blockieren.
+        }
+      }
+
       await _supabase.from('profile_photos').delete().eq('id', photo.id);
 
       await _loadPhotos();
@@ -977,6 +1074,62 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
 
     setState(() {
       _birthDate = picked;
+      _birthDateCtrl.text = _formatBirthDate(picked);
+    });
+  }
+
+  DateTime? _parseBirthDateInput(String input) {
+    final parts = input.trim().split('.');
+    if (parts.length != 3) return null;
+
+    final day = int.tryParse(parts[0]);
+    final month = int.tryParse(parts[1]);
+    final year = int.tryParse(parts[2]);
+
+    if (day == null || month == null || year == null) return null;
+    if (year < 1940 || month < 1 || month > 12 || day < 1 || day > 31) {
+      return null;
+    }
+
+    final parsed = DateTime(year, month, day);
+    final isSameDate = parsed.year == year &&
+        parsed.month == month &&
+        parsed.day == day;
+
+    if (!isSameDate) return null;
+
+    final now = DateTime.now();
+    final latestAllowed = DateTime(now.year - 18, now.month, now.day);
+    if (parsed.isAfter(latestAllowed)) return null;
+
+    return parsed;
+  }
+
+  void _onBirthDateChanged(String value) {
+    final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    final limitedDigits = digits.length > 8 ? digits.substring(0, 8) : digits;
+
+    String formatted = limitedDigits;
+    if (limitedDigits.length > 4) {
+      formatted =
+          '${limitedDigits.substring(0, 2)}.${limitedDigits.substring(2, 4)}.${limitedDigits.substring(4)}';
+    } else if (limitedDigits.length > 2) {
+      formatted =
+          '${limitedDigits.substring(0, 2)}.${limitedDigits.substring(2)}';
+    }
+
+    if (_birthDateCtrl.text != formatted) {
+      _birthDateCtrl.value = TextEditingValue(
+        text: formatted,
+        selection: TextSelection.collapsed(offset: formatted.length),
+      );
+    }
+
+    final parsed =
+        formatted.length == 10 ? _parseBirthDateInput(formatted) : null;
+
+    setState(() {
+      _birthDate = parsed;
     });
   }
 
@@ -1048,7 +1201,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                         child: Text(
                           t.multipleChoicePossible,
                           style: TextStyle(
-                            color: Colors.black.withOpacity(0.65),
+                            color: Colors.black.withValues(alpha: 0.65),
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -1166,7 +1319,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                         child: Text(
                           t.multipleChoicePossible,
                           style: TextStyle(
-                            color: Colors.black.withOpacity(0.65),
+                            color: Colors.black.withValues(alpha: 0.65),
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -1277,6 +1430,12 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       final about = _aboutCtrl.text.trim();
       final hobbiesList = _buildSavedHobbies();
 
+      final geoPoint = await ProfileGeoService.resolveLocation(
+        country: _selectedCountry,
+        province: _provinceCtrl.text.trim(),
+        postalCode: _postalCodeCtrl.text.trim(),
+      );
+
       await _supabase.from('profiles').upsert({
         'user_id': user.id,
         'display_name': _displayNameCtrl.text.trim(),
@@ -1302,7 +1461,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
             ? null
             : _postalCodeCtrl.text.trim(),
         'show_postal_code': _showPostalCode,
-        'birthdate': _birthDate?.toIso8601String(),
+        'birthdate': _birthDate == null
+            ? null
+            : "${_birthDate!.year.toString().padLeft(4, '0')}-${_birthDate!.month.toString().padLeft(2, '0')}-${_birthDate!.day.toString().padLeft(2, '0')}",
         'zodiac_sign': _selectedZodiacSign,
         'smoking_status': _selectedSmokingStatus,
         'hair_color': _selectedHairColor,
@@ -1325,6 +1486,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                 ? null
                 : _preferredOriginCountryCtrl.text.trim(),
         'search_radius_km': _searchRadiusKm.round(),
+        'latitude': geoPoint?.latitude,
+        'longitude': geoPoint?.longitude,
         'line_id': _lineCtrl.text.trim().isEmpty ? null : _lineCtrl.text.trim(),
         'whatsapp_number': _whatsappCtrl.text.trim().isEmpty
             ? null
@@ -1403,7 +1566,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
-          color: Colors.black.withOpacity(0.08),
+          color: Colors.black.withValues(alpha: 0.08),
         ),
       ),
       child: Row(
@@ -1525,28 +1688,72 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     final t = _t;
     final age = _calculateAge(_birthDate);
 
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          flex: 2,
-          child: OutlinedButton.icon(
-            onPressed: _pickBirthDate,
-            icon: const Icon(Icons.calendar_month_outlined),
-            label: Text(
-              _birthDate == null ? t.selectBirthdate : _formatBirthDate(_birthDate),
-              overflow: TextOverflow.ellipsis,
+        TextFormField(
+          controller: _birthDateCtrl,
+          keyboardType: TextInputType.number,
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(8),
+          ],
+          decoration: InputDecoration(
+            labelText: t.selectBirthdate,
+            hintText: 'TT.MM.JJJJ',
+            border: const OutlineInputBorder(),
+            prefixIcon: const Icon(Icons.calendar_month_outlined),
+            suffixIcon: IconButton(
+              tooltip: t.selectBirthdate,
+              onPressed: _pickBirthDate,
+              icon: const Icon(Icons.edit_calendar_outlined),
             ),
           ),
+          onChanged: _onBirthDateChanged,
+          validator: (value) {
+            final text = (value ?? '').trim();
+            if (text.isEmpty) return null;
+
+            if (text.length != 10 || _parseBirthDateInput(text) == null) {
+              return t.isGerman
+                  ? 'Bitte gib ein gültiges Geburtsdatum ein (TT.MM.JJJJ, 18+).'
+                  : t.isThai
+                      ? 'Bitte gib ein gültiges Geburtsdatum ein (TT.MM.JJJJ, 18+).'
+                      : 'Please enter a valid birthdate (DD.MM.YYYY, 18+).';
+            }
+
+            return null;
+          },
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: InputDecorator(
-            decoration: InputDecoration(
-              labelText: t.age,
-              border: const OutlineInputBorder(),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              flex: 2,
+              child: OutlinedButton.icon(
+                onPressed: _pickBirthDate,
+                icon: const Icon(Icons.calendar_today_outlined),
+                label: Text(
+                  t.isGerman
+                      ? 'Kalender öffnen'
+                      : t.isThai
+                          ? 'Kalender öffnen'
+                          : 'Open calendar',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             ),
-            child: Text(age == null ? '' : age.toString()),
-          ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: InputDecorator(
+                decoration: InputDecoration(
+                  labelText: t.age,
+                  border: const OutlineInputBorder(),
+                ),
+                child: Text(age == null ? '' : age.toString()),
+              ),
+            ),
+          ],
         ),
       ],
     );
@@ -1557,7 +1764,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.04),
+        color: Colors.black.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -1569,7 +1776,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
             child: Text(
               _t.privateMessengerInfo,
               style: TextStyle(
-                color: Colors.black.withOpacity(0.68),
+                color: Colors.black.withValues(alpha: 0.68),
                 fontWeight: FontWeight.w600,
                 height: 1.35,
               ),
@@ -1592,7 +1799,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.black.withOpacity(0.08)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -1625,7 +1832,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.black.withOpacity(0.08)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -1639,10 +1846,16 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           ),
           Slider(
             value: _searchRadiusKm,
-            min: 1,
-            max: 500,
-            divisions: 499,
-            label: '${_searchRadiusKm.round()} km',
+            min: _minSearchRadiusKm,
+            max: _worldwideSearchRadiusKm,
+            divisions: _searchRadiusDivisions,
+            label: _searchRadiusKm >= _worldwideSearchRadiusKm
+                ? (_t.isGerman
+                    ? 'Weltweit'
+                    : _t.isThai
+                        ? 'ทั่วโลก'
+                        : 'Worldwide')
+                : '${_searchRadiusKm.round()} km',
             onChanged: (value) {
               setState(() {
                 _searchRadiusKm = value;
@@ -2112,7 +2325,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                       child: Container(
                         padding: const EdgeInsets.all(4),
                         decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.55),
+                          color: Colors.black.withValues(alpha: 0.55),
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(
@@ -2154,10 +2367,10 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -2203,7 +2416,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                     Text(
                       t.profilePictureHint,
                       style: TextStyle(
-                        color: Colors.black.withOpacity(0.65),
+                        color: Colors.black.withValues(alpha: 0.65),
                         fontWeight: FontWeight.w600,
                       ),
                       textAlign: TextAlign.center,

@@ -1,4 +1,4 @@
-﻿import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -6,6 +6,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type",
 };
+
+let cachedAccessToken: string | null = null;
+let cachedAccessTokenExpiresAt = 0;
 
 function jsonResponse(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -44,7 +47,11 @@ function base64UrlEncodeString(input: string): string {
 
 function base64UrlEncodeBytes(bytes: Uint8Array): string {
   let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
+
+  for (const b of bytes) {
+    binary += String.fromCharCode(b);
+  }
+
   return btoa(binary)
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
@@ -78,7 +85,7 @@ async function createJwt(serviceAccount: {
   const pem = serviceAccount.private_key
     .replace("-----BEGIN PRIVATE KEY-----", "")
     .replace("-----END PRIVATE KEY-----", "")
-    .replace(/\n/g, "");
+    .replace(/\s/g, "");
 
   const binaryDer = Uint8Array.from(atob(pem), (c) => c.charCodeAt(0));
 
@@ -108,6 +115,12 @@ async function getGoogleAccessToken(serviceAccount: {
   private_key: string;
   token_uri?: string;
 }): Promise<string> {
+  const nowMs = Date.now();
+
+  if (cachedAccessToken && nowMs < cachedAccessTokenExpiresAt - 60_000) {
+    return cachedAccessToken;
+  }
+
   const jwt = await createJwt(serviceAccount);
 
   const tokenRes = await fetchWithTimeout(
@@ -137,9 +150,13 @@ async function getGoogleAccessToken(serviceAccount: {
   }
 
   const accessToken = parsed.access_token;
+
   if (typeof accessToken !== "string" || !accessToken) {
     throw new Error(`Missing access_token in token response: ${raw}`);
   }
+
+  cachedAccessToken = accessToken;
+  cachedAccessTokenExpiresAt = nowMs + 55 * 60 * 1000;
 
   return accessToken;
 }
@@ -153,37 +170,85 @@ function normalizePushBody(messageType: string, body: string): string {
   return "Neue Nachricht";
 }
 
+function safeDataValue(value: string): string {
+  return value == null ? "" : String(value);
+}
+
 function isInvalidFcmTokenResponse(response: unknown): boolean {
-  if (!response || typeof response !== "object") return false;
-
-  const maybeError = (response as Record<string, unknown>).error;
-  if (!maybeError || typeof maybeError !== "object") return false;
-
-  const errorObj = maybeError as Record<string, unknown>;
-  const status = errorObj.status?.toString() ?? "";
-  const message = errorObj.message?.toString() ?? "";
+  const text = JSON.stringify(response);
 
   return (
-    status === "UNREGISTERED" ||
-    status === "INVALID_ARGUMENT" ||
-    message.includes("Requested entity was not found") ||
-    message.includes("registration token is not a valid FCM registration token") ||
-    message.includes("The registration token is not a valid FCM registration token")
+    text.includes("UNREGISTERED") ||
+    text.includes("INVALID_ARGUMENT") ||
+    text.includes("Requested entity was not found") ||
+    text.includes("registration token is not a valid FCM registration token") ||
+    text.includes("The registration token is not a valid FCM registration token")
   );
 }
+
+async function runLimited<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  let index = 0;
+
+  async function runWorker() {
+    while (index < items.length) {
+      const currentIndex = index++;
+      results[currentIndex] = await worker(items[currentIndex]);
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(limit, items.length) },
+    () => runWorker(),
+  );
+
+  await Promise.all(workers);
+
+  return results;
+}
+
+type PushTokenMeta = {
+  token: string;
+  rowId: number | null;
+  platform: string;
+};
+
+type SendResult = {
+  token: string;
+  platform: string;
+  ok: boolean;
+  status: number;
+  response?: unknown;
+  error?: string;
+  invalidToken: boolean;
+};
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  try {
-    const body = await req.json();
+  if (req.method !== "POST") {
+    return jsonResponse({ error: "Method not allowed" }, 405);
+  }
 
-    const messageId = body.message_id?.toString();
-    const conversationId = body.conversation_id?.toString();
-    const senderId = body.sender_id?.toString();
-    const recipientId = body.recipient_id?.toString();
+  try {
+    let body: Record<string, unknown>;
+
+    try {
+      body = await req.json();
+    } catch (_) {
+      return jsonResponse({ error: "Invalid JSON body" }, 400);
+    }
+
+    const messageId = body.message_id?.toString().trim();
+    const conversationId = body.conversation_id?.toString().trim();
+    const senderId = body.sender_id?.toString().trim();
+    const recipientId = body.recipient_id?.toString().trim();
     const messageBody = body.body?.toString() ?? "";
     const messageType = body.message_type?.toString() ?? "text";
     const mediaUrl = body.media_url?.toString() ?? "";
@@ -201,13 +266,6 @@ serve(async (req) => {
     });
 
     if (!messageId || !conversationId || !senderId || !recipientId) {
-      console.error("missing required fields", {
-        messageId,
-        conversationId,
-        senderId,
-        recipientId,
-      });
-
       return jsonResponse(
         {
           error:
@@ -223,12 +281,6 @@ serve(async (req) => {
       Deno.env.get("GOOGLE_SERVICE_ACCOUNT_JSON") ?? "";
 
     if (!supabaseUrl || !serviceRoleKey || !serviceAccountJson) {
-      console.error("missing env", {
-        hasSupabaseUrl: !!supabaseUrl,
-        hasServiceRoleKey: !!serviceRoleKey,
-        hasGoogleServiceAccountJson: !!serviceAccountJson,
-      });
-
       return jsonResponse(
         {
           error:
@@ -251,8 +303,6 @@ serve(async (req) => {
     try {
       serviceAccount = JSON.parse(serviceAccountJson);
     } catch (e) {
-      console.error("invalid GOOGLE_SERVICE_ACCOUNT_JSON", e);
-
       return jsonResponse(
         {
           error: "GOOGLE_SERVICE_ACCOUNT_JSON is not valid JSON",
@@ -267,8 +317,6 @@ serve(async (req) => {
       !serviceAccount.client_email ||
       !serviceAccount.private_key
     ) {
-      console.error("service account missing required fields");
-
       return jsonResponse(
         {
           error:
@@ -280,7 +328,6 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
-    // 1) Block prüfen
     const { data: blockRows, error: blockError } = await supabase
       .from("user_blocks")
       .select("id")
@@ -290,7 +337,6 @@ serve(async (req) => {
       .limit(1);
 
     if (blockError) {
-      console.error("blockError", blockError);
       return jsonResponse({ error: blockError.message }, 500);
     }
 
@@ -299,7 +345,6 @@ serve(async (req) => {
         senderId,
         recipientId,
         conversationId,
-        blockId: blockRows[0]?.id,
       });
 
       return jsonResponse({
@@ -309,34 +354,25 @@ serve(async (req) => {
       });
     }
 
-    console.log("block check passed", {
-      senderId,
-      recipientId,
-      blocked: false,
-    });
-
-    // 2) Presence prüfen
     const { data: presenceRows, error: presenceError } = await supabase
       .from("chat_presence")
-      .select("user_id, conversation_id, updated_at")
+      .select("conversation_id")
       .eq("user_id", recipientId)
       .eq("conversation_id", conversationId)
       .gte("updated_at", new Date(Date.now() - 30 * 1000).toISOString())
-      .limit(5);
+      .limit(1);
 
     if (presenceError) {
       console.error("presenceError", presenceError);
     }
 
     const recipientIsActiveInChat =
-      Array.isArray(presenceRows) &&
-      presenceRows.some((p) => p.conversation_id === conversationId);
+      Array.isArray(presenceRows) && presenceRows.length > 0;
 
     if (recipientIsActiveInChat) {
       console.log("push skipped: recipient_active_in_chat", {
         recipientId,
         conversationId,
-        presenceCount: presenceRows?.length ?? 0,
       });
 
       return jsonResponse({
@@ -346,13 +382,6 @@ serve(async (req) => {
       });
     }
 
-    console.log("presence check passed", {
-      recipientId,
-      conversationId,
-      active: false,
-    });
-
-    // 3) Sender-Profil laden
     const { data: senderProfile, error: senderProfileError } = await supabase
       .from("profiles")
       .select("display_name, avatar_url")
@@ -371,21 +400,17 @@ serve(async (req) => {
     const senderAvatarUrl =
       senderProfile?.avatar_url?.toString()?.trim() || "";
 
-    // 4) Push Tokens laden
     const { data: tokenRows, error: tokenError } = await supabase
       .from("push_tokens")
       .select("id, token, fcm_token, platform")
-      .eq("user_id", recipientId);
+      .eq("user_id", recipientId)
+      .limit(20);
 
     if (tokenError) {
-      console.error("tokenError", tokenError);
       return jsonResponse({ error: tokenError.message }, 500);
     }
 
-    const uniqueTokens = new Map<
-      string,
-      { rowId: number | null; platform: string }
-    >();
+    const uniqueTokens = new Map<string, PushTokenMeta>();
 
     for (const row of tokenRows ?? []) {
       const token =
@@ -396,12 +421,13 @@ serve(async (req) => {
       if (!token) continue;
 
       uniqueTokens.set(token, {
+        token,
         rowId: typeof row?.id === "number" ? row.id : null,
         platform: row?.platform?.toString() ?? "unknown",
       });
     }
 
-    const tokens = Array.from(uniqueTokens.entries());
+    const tokens = Array.from(uniqueTokens.values());
 
     if (tokens.length === 0) {
       console.log("push skipped: no_push_tokens", {
@@ -415,39 +441,33 @@ serve(async (req) => {
       });
     }
 
-    console.log("push tokens found", {
-      recipientId,
-      tokenCount: tokens.length,
-    });
-
     const notificationBody =
       pushBodyFromCaller || normalizePushBody(messageType, messageBody);
 
     const accessToken = await getGoogleAccessToken(serviceAccount);
-    const results: unknown[] = [];
 
-    for (const [token, tokenMeta] of tokens) {
+    const sendResults = await runLimited(tokens, 8, async (tokenMeta) => {
       const fcmPayload = {
         message: {
-          token,
+          token: tokenMeta.token,
           notification: {
             title: senderDisplayName,
             body: notificationBody,
           },
           data: {
             type: "chat_message",
-            message_id: messageId,
-            conversation_id: conversationId,
-            sender_id: senderId,
-            recipient_id: recipientId,
-            other_user_id: senderId,
-            other_display_name: senderDisplayName,
-            other_avatar_url: senderAvatarUrl,
-            message_type: messageType,
-            body: messageBody,
-            media_url: mediaUrl,
-            thumbnail_url: thumbnailUrl,
-            duration_seconds: durationSeconds,
+            message_id: safeDataValue(messageId),
+            conversation_id: safeDataValue(conversationId),
+            sender_id: safeDataValue(senderId),
+            recipient_id: safeDataValue(recipientId),
+            other_user_id: safeDataValue(senderId),
+            other_display_name: safeDataValue(senderDisplayName),
+            other_avatar_url: safeDataValue(senderAvatarUrl),
+            message_type: safeDataValue(messageType),
+            body: safeDataValue(messageBody),
+            media_url: safeDataValue(mediaUrl),
+            thumbnail_url: safeDataValue(thumbnailUrl),
+            duration_seconds: safeDataValue(durationSeconds),
             click_action: "FLUTTER_NOTIFICATION_CLICK",
           },
           webpush: {
@@ -464,6 +484,7 @@ serve(async (req) => {
             notification: {
               click_action: "FLUTTER_NOTIFICATION_CLICK",
               channel_id: "chat_messages",
+              sound: "default",
             },
           },
           apns: {
@@ -503,63 +524,79 @@ serve(async (req) => {
           // rawText bleibt drin
         }
 
-        if (!fcmRes.ok && isInvalidFcmTokenResponse(parsed)) {
-          try {
-            await supabase.from("push_tokens").delete().eq("user_id", recipientId).eq("token", token);
-            await supabase.from("push_tokens").delete().eq("user_id", recipientId).eq("fcm_token", token);
-
-            console.log("invalid token removed", {
-              recipientId,
-              token,
-              rowId: tokenMeta.rowId,
-            });
-          } catch (cleanupError) {
-            console.error("invalid token cleanup failed", cleanupError);
-          }
-        }
+        const invalidToken = !fcmRes.ok && isInvalidFcmTokenResponse(parsed);
 
         console.log("push send result", {
           recipientId,
-          token,
           platform: tokenMeta.platform,
           ok: fcmRes.ok,
           status: fcmRes.status,
         });
 
-        results.push({
-          token,
+        return {
+          token: tokenMeta.token,
           platform: tokenMeta.platform,
           ok: fcmRes.ok,
           status: fcmRes.status,
           response: parsed,
-        });
+          invalidToken,
+        } satisfies SendResult;
       } catch (err) {
         console.error("push send failed", {
           recipientId,
-          token,
           platform: tokenMeta.platform,
           error: err instanceof Error ? err.message : String(err),
         });
 
-        results.push({
-          token,
+        return {
+          token: tokenMeta.token,
           platform: tokenMeta.platform,
           ok: false,
           status: 0,
           error: err instanceof Error ? err.message : String(err),
-        });
+          invalidToken: false,
+        } satisfies SendResult;
       }
+    });
+
+    const invalidTokens = sendResults
+      .filter((result) => result.invalidToken)
+      .map((result) => result.token);
+
+    if (invalidTokens.length > 0) {
+      await supabase
+        .from("push_tokens")
+        .delete()
+        .eq("user_id", recipientId)
+        .or(
+          `token.in.(${invalidTokens.join(",")}),fcm_token.in.(${invalidTokens.join(",")})`,
+        );
     }
+
+    const successCount = sendResults.filter((result) => result.ok).length;
+    const failedCount = sendResults.length - successCount;
 
     console.log("send-chat-push finished", {
       recipientId,
-      sent: results.length,
+      sent: sendResults.length,
+      success: successCount,
+      failed: failedCount,
+      invalidTokensRemoved: invalidTokens.length,
     });
 
     return jsonResponse({
       success: true,
-      sent: results.length,
-      results,
+      sent: sendResults.length,
+      success_count: successCount,
+      failed_count: failedCount,
+      invalid_tokens_removed: invalidTokens.length,
+      results: sendResults.map((result) => ({
+        platform: result.platform,
+        ok: result.ok,
+        status: result.status,
+        response: result.response,
+        error: result.error,
+      })),
     });
   } catch (e) {
     console.error("send-chat-push fatal error", e);

@@ -14,12 +14,12 @@ class UpgradeScreen extends StatefulWidget {
 }
 
 class _UpgradeScreenState extends State<UpgradeScreen> {
-  final TextEditingController _betaCodeController = TextEditingController();
+  final TextEditingController _promoCodeController = TextEditingController();
 
   bool _loading = true;
   bool _purchasing = false;
   bool _restoring = false;
-  bool _activatingBeta = false;
+  bool _activatingPromo = false;
   String? _error;
 
   Package? _premiumMonthly;
@@ -41,7 +41,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
 
   @override
   void dispose() {
-    _betaCodeController.dispose();
+    _promoCodeController.dispose();
     super.dispose();
   }
 
@@ -101,51 +101,51 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
       return null;
     }
 
-    _premiumMonthly = findByProductId('premium_monthly');
-    _premiumSemiannual = findByProductId('premium_semiannual');
-    _premiumYearly = findByProductId('premium_yearly');
+    _premiumMonthly = findByProductId('meethai_premium');
+    _premiumSemiannual = findByProductId('meethai_premium_halfyear');
+    _premiumYearly = findByProductId('meethai_premium_yearly');
 
-    _goldMonthly = findByProductId('gold_monthly');
-    _goldSemiannual = findByProductId('gold_semiannual');
-    _goldYearly = findByProductId('gold_yearly');
+    _goldMonthly = findByProductId('meethai_gold');
+    _goldSemiannual = findByProductId('meethai_gold_halfyear');
+    _goldYearly = findByProductId('meethai_gold_year');
   }
 
-  Future<void> _activateBetaCode() async {
-    if (_activatingBeta || _purchasing || _restoring) return;
+  Future<void> _activatePromoCode() async {
+    if (_activatingPromo || _purchasing || _restoring) return;
 
     final t = AppStrings.of(context);
-    final code = _betaCodeController.text.trim();
+    final code = _promoCodeController.text.trim();
 
     if (code.isEmpty) {
       setState(() {
         _error = t.isGerman
-            ? 'Bitte gib dein Passwort ein.'
+            ? 'Bitte gib deinen Code ein.'
             : t.isThai
-                ? 'กรุณาใส่รหัสผ่าน'
-                : 'Please enter your password.';
+                ? 'กรุณาใส่รหัสของคุณ'
+                : 'Please enter your code.';
       });
       return;
     }
 
     setState(() {
-      _activatingBeta = true;
+      _activatingPromo = true;
       _error = null;
     });
 
     try {
       final success =
-          await SubscriptionService.instance.activateBetaTesterCode(code);
+          await SubscriptionService.instance.activatePromoCode(code);
 
       if (!mounted) return;
 
       if (!success) {
         setState(() {
-          _activatingBeta = false;
+          _activatingPromo = false;
           _error = t.isGerman
-              ? 'Passwort ist ungültig.'
+              ? 'Code ist ungültig.'
               : t.isThai
-                  ? 'รหัสผ่านไม่ถูกต้อง'
-                  : 'Password is invalid.';
+                  ? 'รหัสไม่ถูกต้อง'
+                  : 'Code is invalid.';
         });
         return;
       }
@@ -155,17 +155,17 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
       if (!mounted) return;
 
       setState(() {
-        _activatingBeta = false;
+        _activatingPromo = false;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             t.isGerman
-                ? 'Beta-Zugang wurde freigeschaltet.'
+                ? 'Gratis-Zugang wurde freigeschaltet.'
                 : t.isThai
-                    ? 'เปิดใช้งานสิทธิ์เบต้าแล้ว'
-                    : 'Beta access has been unlocked.',
+                    ? 'เปิดใช้งานสิทธิ์ฟรีแล้ว'
+                    : 'Free access has been unlocked.',
           ),
         ),
       );
@@ -175,18 +175,18 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
       if (!mounted) return;
 
       setState(() {
-        _activatingBeta = false;
+        _activatingPromo = false;
         _error = t.isGerman
-            ? 'Beta-Zugang konnte nicht aktiviert werden: $e'
+            ? 'Code konnte nicht aktiviert werden: $e'
             : t.isThai
-                ? 'ไม่สามารถเปิดใช้งานสิทธิ์เบต้าได้: $e'
-                : 'Beta access could not be activated: $e';
+                ? 'ไม่สามารถเปิดใช้งานรหัสได้: $e'
+                : 'Code could not be activated: $e';
       });
     }
   }
 
   Future<void> _buyPackage(Package package) async {
-    if (_purchasing || _restoring || _activatingBeta) return;
+    if (_purchasing || _restoring || _activatingPromo) return;
 
     final t = AppStrings.of(context);
 
@@ -248,7 +248,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
   }
 
   Future<void> _restorePurchases() async {
-    if (_restoring || _purchasing || _activatingBeta) return;
+    if (_restoring || _purchasing || _activatingPromo) return;
 
     final t = AppStrings.of(context);
 
@@ -311,14 +311,14 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
     );
   }
 
-  Widget _buildBetaTesterCard() {
+  Widget _buildPromoCodeCard() {
     final t = AppStrings.of(context);
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.blue.withOpacity(0.08),
+        color: Colors.blue.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: Colors.blue.withOpacity(0.18)),
+        border: Border.all(color: Colors.blue.withValues(alpha: 0.18)),
       ),
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -326,18 +326,19 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.science_rounded, color: Colors.blue),
+              const Icon(Icons.card_giftcard_rounded, color: Colors.blue),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   t.isGerman
-                      ? 'Beta-Tester Zugang'
+                      ? 'Gratis-Code einlösen'
                       : t.isThai
-                          ? 'สิทธิ์ผู้ทดสอบเบต้า'
-                          : 'Beta tester access',
+                          ? 'ใช้รหัสฟรี'
+                          : 'Redeem free code',
                   style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w900,
+                        letterSpacing: -0.5,
                   ),
                 ),
               ),
@@ -346,44 +347,44 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
           const SizedBox(height: 10),
           Text(
             t.isGerman
-                ? 'Wenn du ein Test-Passwort bekommen hast, kannst du hier Gold kostenlos freischalten.'
+                ? 'Wenn du einen Gratis-Code bekommen hast, kannst du hier Premium oder Gold kostenlos freischalten.'
                 : t.isThai
-                    ? 'หากคุณได้รับรหัสผ่านทดสอบ คุณสามารถปลดล็อก Gold ฟรีได้ที่นี่'
-                    : 'If you received a test password, you can unlock Gold for free here.',
+                    ? 'หากคุณได้รับรหัสฟรี คุณสามารถปลดล็อก Premium หรือ Gold ได้ที่นี่'
+                    : 'If you received a free code, you can unlock Premium or Gold here.',
             style: TextStyle(
-              color: Colors.black.withOpacity(0.68),
+              color: Colors.black.withValues(alpha: 0.68),
               height: 1.35,
               fontWeight: FontWeight.w600,
             ),
           ),
           const SizedBox(height: 12),
           TextField(
-            controller: _betaCodeController,
+            controller: _promoCodeController,
             textCapitalization: TextCapitalization.characters,
-            enabled: !_activatingBeta && !_purchasing && !_restoring,
+            enabled: !_activatingPromo && !_purchasing && !_restoring,
             decoration: InputDecoration(
               labelText: t.isGerman
-                  ? 'Passwort'
+                  ? 'Code'
                   : t.isThai
-                      ? 'รหัสผ่าน'
-                      : 'Password',
+                      ? 'รหัส'
+                      : 'Code',
               hintText: t.isGerman
-                  ? 'Passwort eingeben'
+                  ? 'Code eingeben'
                   : t.isThai
-                      ? 'ใส่รหัสผ่าน'
-                      : 'Enter password',
+                      ? 'ใส่รหัส'
+                      : 'Enter code',
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(28),
               ),
               prefixIcon: const Icon(Icons.key_rounded),
             ),
           ),
           const SizedBox(height: 12),
           ElevatedButton.icon(
-            onPressed: (_activatingBeta || _purchasing || _restoring)
+            onPressed: (_activatingPromo || _purchasing || _restoring)
                 ? null
-                : _activateBetaCode,
-            icon: _activatingBeta
+                : _activatePromoCode,
+            icon: _activatingPromo
                 ? const SizedBox(
                     width: 18,
                     height: 18,
@@ -392,7 +393,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                 : const Icon(Icons.lock_open_rounded),
             label: Text(
               t.isGerman
-                  ? 'Kostenlos freischalten'
+                  ? 'Gratis freischalten'
                   : t.isThai
                       ? 'ปลดล็อกฟรี'
                       : 'Unlock for free',
@@ -403,7 +404,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 14),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(28),
               ),
             ),
           ),
@@ -453,7 +454,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
         color: backgroundColor,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
-          color: accentColor.withOpacity(0.24),
+          color: accentColor.withValues(alpha: 0.24),
         ),
       ),
       padding: const EdgeInsets.all(16),
@@ -478,7 +479,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                     Text(
                       subtitle,
                       style: TextStyle(
-                        color: Colors.black.withOpacity(0.68),
+                        color: Colors.black.withValues(alpha: 0.68),
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -490,10 +491,10 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: accentColor.withOpacity(0.12),
+                    color: accentColor.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(
-                      color: accentColor.withOpacity(0.22),
+                      color: accentColor.withValues(alpha: 0.22),
                     ),
                   ),
                   child: Text(
@@ -520,7 +521,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
           Text(
             footerText,
             style: TextStyle(
-              color: Colors.black.withOpacity(0.66),
+              color: Colors.black.withValues(alpha: 0.66),
               height: 1.35,
               fontWeight: FontWeight.w600,
             ),
@@ -538,7 +539,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                 disabledForegroundColor: Colors.black87,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(28),
                 ),
               ),
               label: Text(
@@ -570,16 +571,16 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: highlighted ? color.withOpacity(0.12) : Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        color: highlighted ? color.withValues(alpha: 0.12) : Colors.white,
+        borderRadius: BorderRadius.circular(28),
         border: Border.all(
-          color: highlighted ? color.withOpacity(0.35) : Colors.black12,
+          color: highlighted ? color.withValues(alpha: 0.35) : Colors.black12,
           width: highlighted ? 1.4 : 1,
         ),
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: (_purchasing || _restoring || _activatingBeta)
+        borderRadius: BorderRadius.circular(28),
+        onTap: (_purchasing || _restoring || _activatingPromo)
             ? null
             : () => _buyPackage(package),
         child: Padding(
@@ -609,7 +610,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                               vertical: 4,
                             ),
                             decoration: BoxDecoration(
-                              color: color.withOpacity(0.14),
+                              color: color.withValues(alpha: 0.14),
                               borderRadius: BorderRadius.circular(999),
                             ),
                             child: Text(
@@ -628,7 +629,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                       Text(
                         description,
                         style: TextStyle(
-                          color: Colors.black.withOpacity(0.62),
+                          color: Colors.black.withValues(alpha: 0.62),
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -677,13 +678,13 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
         color: backgroundColor,
         borderRadius: BorderRadius.circular(22),
         border: Border.all(
-          color: accentColor.withOpacity(0.24),
+          color: accentColor.withValues(alpha: 0.24),
           width: highlight ? 1.6 : 1.0,
         ),
         boxShadow: highlight
             ? [
                 BoxShadow(
-                  color: accentColor.withOpacity(0.14),
+                  color: accentColor.withValues(alpha: 0.14),
                   blurRadius: 18,
                   offset: const Offset(0, 6),
                 ),
@@ -712,7 +713,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                     Text(
                       subtitle,
                       style: TextStyle(
-                        color: Colors.black.withOpacity(0.68),
+                        color: Colors.black.withValues(alpha: 0.68),
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -724,10 +725,10 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: accentColor.withOpacity(0.12),
+                    color: accentColor.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(
-                      color: accentColor.withOpacity(0.22),
+                      color: accentColor.withValues(alpha: 0.22),
                     ),
                   ),
                   child: Text(
@@ -754,7 +755,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
           Text(
             footerText,
             style: TextStyle(
-              color: Colors.black.withOpacity(0.66),
+              color: Colors.black.withValues(alpha: 0.66),
               height: 1.35,
               fontWeight: FontWeight.w600,
             ),
@@ -773,7 +774,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                   disabledForegroundColor: Colors.black87,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(28),
                   ),
                 ),
                 label: Text(
@@ -792,7 +793,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(28),
                 border: Border.all(color: Colors.black12),
               ),
               child: Text(
@@ -842,10 +843,10 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
     final t = AppStrings.of(context);
 
     final heroTitle = t.isGerman
-        ? 'Mehr Likes. Mehr Matches. Mehr Chats. ❤️'
+        ? 'Mehr Matches. Mehr Aufmerksamkeit. ❤️'
         : t.isThai
             ? 'ไลก์มากขึ้น แมตช์มากขึ้น แชตมากขึ้น ❤️'
-            : 'More likes. More matches. More chats. ❤️';
+            : 'More matches. More attention. ❤️';
 
     final heroSubtitle = t.isGerman
         ? 'Wähle den Plan, der am besten zu dir passt. Free ist ideal zum Starten, Premium gibt dir mehr Chancen pro Tag und Gold hebt deine Limits fast komplett auf.'
@@ -887,7 +888,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
             onPressed: _goHome,
           ),
           TextButton(
-            onPressed: (_loading || _purchasing || _restoring || _activatingBeta)
+            onPressed: (_loading || _purchasing || _restoring || _activatingPromo)
                 ? null
                 : _restorePurchases,
             child: _restoring
@@ -910,7 +911,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
         child: _loading
             ? const Center(child: CircularProgressIndicator())
             : SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -919,7 +920,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                       heroTitle,
                       textAlign: TextAlign.center,
                       style: const TextStyle(
-                        fontSize: 24,
+                        fontSize: 32,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
@@ -928,21 +929,62 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                       heroSubtitle,
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: Colors.black.withOpacity(0.68),
+                        color: Colors.black.withValues(alpha: 0.68),
                         height: 1.4,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     const SizedBox(height: 18),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 14,
+                      ),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [
+                            Color(0xFFFF4D8D),
+                            Color(0xFFFF7A59),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(24),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.pinkAccent,
+                            blurRadius: 24,
+                            offset: Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          Icon(
+                            Icons.local_fire_department_rounded,
+                            color: Colors.white,
+                          ),
+                          SizedBox(width: 10),
+                          Text(
+                            'MOST POPULAR',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
                     if (_error != null)
                       Container(
                         margin: const EdgeInsets.only(bottom: 16),
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.red.withOpacity(0.08),
+                          color: Colors.red.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(14),
                           border:
-                              Border.all(color: Colors.red.withOpacity(0.18)),
+                              Border.all(color: Colors.red.withValues(alpha: 0.18)),
                         ),
                         child: Text(
                           _error!,
@@ -952,7 +994,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                           ),
                         ),
                       ),
-                    _buildBetaTesterCard(),
+                    _buildPromoCodeCard(),
                     const SizedBox(height: 16),
                     _buildStaticPlanCard(
                       title: 'FREE',
@@ -962,23 +1004,23 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                               ? 'สำหรับเริ่มต้น'
                               : 'To get started',
                       accentColor: Colors.grey.shade700,
-                      backgroundColor: Colors.grey.withOpacity(0.08),
+                      backgroundColor: Colors.grey.withValues(alpha: 0.08),
                       features: [
                         t.isGerman
-                            ? '10 Likes pro Tag senden'
+                            ? '20 Likes pro Tag senden'
                             : t.isThai
-                                ? 'ส่งได้ 10 ไลก์ต่อวัน'
-                                : 'Send 10 likes per day',
+                                ? 'ส่งได้ 20 ไลก์ต่อวัน'
+                                : 'Send 20 likes per day',
                         t.isGerman
-                            ? 'Die ersten 10 Likes sehen'
+                            ? 'Die ersten 20 Likes sehen'
                             : t.isThai
-                                ? 'เห็น 10 ไลก์แรก'
-                                : 'See the first 10 likes',
+                                ? 'เห็น 20 ไลก์แรก'
+                                : 'See the first 20 likes',
                         t.isGerman
-                            ? 'Die ersten 10 Likes beantworten'
+                            ? 'Die ersten 20 Likes beantworten'
                             : t.isThai
-                                ? 'ตอบกลับ 10 ไลก์แรก'
-                                : 'Reply to the first 10 likes',
+                                ? 'ตอบกลับ 20 ไลก์แรก'
+                                : 'Reply to the first 20 likes',
                         t.isGerman
                             ? 'Weitere Likes gesperrt'
                             : t.isThai
@@ -1016,7 +1058,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                               ? 'โอกาสมากขึ้นต่อวัน'
                               : 'More chances per day',
                       accentColor: Colors.pink,
-                      backgroundColor: Colors.pink.withOpacity(0.10),
+                      backgroundColor: Colors.pink.withValues(alpha: 0.10),
                       highlight: true,
                       badgeText: (_isPremiumActive && !_isGoldActive)
                           ? (t.isGerman
@@ -1032,20 +1074,20 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                       isActive: _isPremiumActive && !_isGoldActive,
                       features: [
                         t.isGerman
-                            ? '25 Likes pro Tag senden'
+                            ? '50 Likes pro Tag senden'
                             : t.isThai
-                                ? 'ส่งได้ 25 ไลก์ต่อวัน'
-                                : 'Send 25 likes per day',
+                                ? 'ส่งได้ 50 ไลก์ต่อวัน'
+                                : 'Send 50 likes per day',
                         t.isGerman
-                            ? 'Die ersten 25 Likes sehen'
+                            ? 'Die ersten 50 Likes sehen'
                             : t.isThai
-                                ? 'เห็น 25 ไลก์แรก'
-                                : 'See the first 25 likes',
+                                ? 'เห็น 50 ไลก์แรก'
+                                : 'See the first 50 likes',
                         t.isGerman
-                            ? 'Die ersten 25 Likes beantworten'
+                            ? 'Die ersten 50 Likes beantworten'
                             : t.isThai
-                                ? 'ตอบกลับ 25 ไลก์แรก'
-                                : 'Reply to the first 25 likes',
+                                ? 'ตอบกลับ 50 ไลก์แรก'
+                                : 'Reply to the first 50 likes',
                         t.isGerman
                             ? 'Mehr Matches und schnellere Kontakte'
                             : t.isThai
@@ -1068,7 +1110,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                               ? 'อิสระสูงสุด'
                               : 'Maximum freedom',
                       accentColor: Colors.amber,
-                      backgroundColor: Colors.amber.withOpacity(0.12),
+                      backgroundColor: Colors.amber.withValues(alpha: 0.12),
                       badgeText: _isGoldActive
                           ? (t.isGerman
                               ? 'AKTIV'
@@ -1114,10 +1156,10 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.04),
-                        borderRadius: BorderRadius.circular(16),
+                        color: Colors.black.withValues(alpha: 0.04),
+                        borderRadius: BorderRadius.circular(28),
                         border: Border.all(
-                          color: Colors.black.withOpacity(0.06),
+                          color: Colors.black.withValues(alpha: 0.06),
                         ),
                       ),
                       child: Column(
@@ -1147,7 +1189,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                             whyText,
                             textAlign: TextAlign.center,
                             style: TextStyle(
-                              color: Colors.black.withOpacity(0.7),
+                              color: Colors.black.withValues(alpha: 0.7),
                               height: 1.4,
                               fontWeight: FontWeight.w600,
                             ),
@@ -1160,7 +1202,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                       noteText,
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        color: Colors.black.withOpacity(0.56),
+                        color: Colors.black.withValues(alpha: 0.56),
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                       ),

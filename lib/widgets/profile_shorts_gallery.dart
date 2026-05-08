@@ -194,7 +194,7 @@ class _ProfileShortsGalleryState extends State<ProfileShortsGallery> {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             borderRadius: BorderRadius.circular(14),
           ),
           child: Row(
@@ -241,12 +241,12 @@ class _ShortThumb extends StatelessWidget {
               child: thumbnailUrl != null
                   ? Image.network(thumbnailUrl!, fit: BoxFit.cover)
                   : Container(
-                      color: Colors.black.withOpacity(0.08),
+                      color: Colors.black.withValues(alpha: 0.08),
                       child: const Center(child: Icon(Icons.videocam_rounded, size: 34)),
                     ),
             ),
             Positioned.fill(
-              child: Container(color: Colors.black.withOpacity(0.10)),
+              child: Container(color: Colors.black.withValues(alpha: 0.10)),
             ),
             const Positioned(
               left: 10,

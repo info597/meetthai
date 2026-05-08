@@ -26,9 +26,9 @@ class LikeResult {
 class LikeService {
   static final SupabaseClient _supa = Supabase.instance.client;
 
-  static const String _freeLikeLimitReached = 'FREE_LIKE_LIMIT_REACHED:10';
+  static const String _freeLikeLimitReached = 'FREE_LIKE_LIMIT_REACHED:20';
   static const String _premiumLikeLimitReached =
-      'PREMIUM_LIKE_LIMIT_REACHED:25';
+      'PREMIUM_LIKE_LIMIT_REACHED:50';
   static const String _freeSuperLikeLimitReached =
       'FREE_SUPER_LIKE_LIMIT_REACHED:1';
   static const String _premiumSuperLikeLimitReached =

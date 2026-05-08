@@ -25,7 +25,7 @@ class PhotoGrid extends StatelessWidget {
               Image.network(p.url, fit: BoxFit.cover),
               if (p.blurred)
                 Container(
-                  color: Colors.black.withOpacity(0.35),
+                  color: Colors.black.withValues(alpha: 0.35),
                   alignment: Alignment.center,
                   child: const Text('Upgrade', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 ),

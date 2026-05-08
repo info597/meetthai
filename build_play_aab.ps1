@@ -1,8 +1,8 @@
 $ErrorActionPreference = "Stop"
 
 Write-Host ""
-Write-Host "MeetThai Beta APK Builder"
-Write-Host "------------------------"
+Write-Host "MeetThai Google Play AAB Builder"
+Write-Host "-------------------------------"
 
 $pubspecPath = "pubspec.yaml"
 
@@ -44,33 +44,46 @@ Set-Content -Path $pubspecPath -Value $newPubspec -Encoding UTF8
 Write-Host "pubspec.yaml wurde aktualisiert."
 Write-Host ""
 
+Write-Host "Flutter clean..."
 flutter clean
+if ($LASTEXITCODE -ne 0) {
+    throw "flutter clean fehlgeschlagen."
+}
+
+Write-Host ""
+Write-Host "Flutter pub get..."
 flutter pub get
+if ($LASTEXITCODE -ne 0) {
+    throw "flutter pub get fehlgeschlagen."
+}
 
-flutter build apk --release `
-"--dart-define=SUPABASE_URL=https://kmcykmpimhyculcnshmp.supabase.co" `
-"--dart-define=SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImttY3lrbXBpbWh5Y3VsY25zaG1wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI5NTEzNDAsImV4cCI6MjA3ODUyNzM0MH0.7A5JAm_hSnlT84w-nsb84rLYyPJUMdqVkbDmVmSCMyo" `
-"--dart-define=REVENUECAT_PUBLIC_KEY=test_YunwSEZYuNOwuQcVZTgdzCEsDpE"
+Write-Host ""
+Write-Host "Flutter build appbundle..."
+flutter build appbundle --release
+if ($LASTEXITCODE -ne 0) {
+    throw "flutter build appbundle fehlgeschlagen."
+}
 
-$outputDir = "release_apks"
+$outputDir = "release_aab"
 
 if (!(Test-Path $outputDir)) {
     New-Item -ItemType Directory -Path $outputDir | Out-Null
 }
 
-$sourceApk = "build\app\outputs\flutter-apk\app-release.apk"
-$targetApk = "$outputDir\meetthai-$newVersionFileSafe.apk"
+$sourceAab = "build\app\outputs\bundle\release\app-release.aab"
+$targetAab = "$outputDir\meetthai-$newVersionFileSafe.aab"
 
-if (!(Test-Path $sourceApk)) {
-    throw "APK wurde nicht gefunden: $sourceApk"
+if (!(Test-Path $sourceAab)) {
+    throw "AAB wurde nicht gefunden: $sourceAab"
 }
 
-Copy-Item $sourceApk $targetApk -Force
+Copy-Item $sourceAab $targetAab -Force
 
 Write-Host ""
 Write-Host "Fertig!"
-Write-Host "APK liegt hier:"
-Write-Host $targetApk
+Write-Host "AAB liegt hier:"
+Write-Host $targetAab
 Write-Host ""
-Write-Host "GitHub Release Tag:"
-Write-Host "v$major.$minor.$patch"
+Write-Host "Google Play Version:"
+Write-Host "Version Name: $major.$minor.$patch"
+Write-Host "Version Code: $build"

@@ -38,11 +38,13 @@ class _ChatScreenState extends State<ChatScreen> {
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
 
-  StreamSubscription<List<Map<String, dynamic>>>? _sub;
+  RealtimeChannel? _messagesChannel;
   Timer? _cooldownTimer;
   Timer? _typingDebounceTimer;
+  Timer? _typingClearTimer;
   Timer? _initialFallbackTimer;
   Timer? _highlightTimer;
+  Timer? _presenceHeartbeatTimer;
 
   RealtimeChannel? _typingChannel;
   RealtimeChannel? _presenceChannel;
@@ -56,6 +58,10 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _sending = false;
   bool _uploadingMedia = false;
   bool _refreshing = false;
+  bool _loadingInitialMessages = true;
+  bool _loadingOlderMessages = false;
+  bool _hasMoreOlderMessages = true;
+
   String? _error;
 
   int _cooldownSeconds = 0;
@@ -72,6 +78,8 @@ class _ChatScreenState extends State<ChatScreen> {
 
   bool _initialScrollDone = false;
   bool _isNearBottom = true;
+
+  static const int _messagePageSize = 40;
 
   String get _myId => _supa.auth.currentUser?.id ?? '';
 
@@ -104,7 +112,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _loadMyProfile(),
       _loadOtherUserProfile(),
       _loadBlockedState(),
-      _loadMessages(jumpToBottom: widget.initialMessageId == null),
+      _loadInitialMessages(jumpToBottom: widget.initialMessageId == null),
       _subscription.refreshFromSupabase(),
     ]);
 
@@ -113,10 +121,11 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     await _setChatPresence();
+    _startPresenceHeartbeat();
     await _subscribeTypingRealtime();
     await _subscribePresenceRealtime();
 
-    _listenRealtime();
+    await _listenRealtime();
     _scheduleInitialFallbackRefresh();
     await _markAsRead();
   }
@@ -126,11 +135,12 @@ class _ChatScreenState extends State<ChatScreen> {
     PushService.setCurrentOpenConversation(null);
     PushService.registerScrollToMessageCallback(null);
 
-    _sub?.cancel();
     _cooldownTimer?.cancel();
     _typingDebounceTimer?.cancel();
+    _typingClearTimer?.cancel();
     _initialFallbackTimer?.cancel();
     _highlightTimer?.cancel();
+    _presenceHeartbeatTimer?.cancel();
 
     _subscription.removeListener(_onSubscriptionChanged);
 
@@ -145,6 +155,10 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _disposeRealtimeChannels() async {
+    if (_messagesChannel != null) {
+      await _supa.removeChannel(_messagesChannel!);
+      _messagesChannel = null;
+    }
     if (_typingChannel != null) {
       await _supa.removeChannel(_typingChannel!);
       _typingChannel = null;
@@ -163,11 +177,20 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  void _startPresenceHeartbeat() {
+    _presenceHeartbeatTimer?.cancel();
+
+    _presenceHeartbeatTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (!mounted || _chatBlocked) return;
+      unawaited(_setChatPresence(silent: true));
+    });
+  }
+
   Future<void> _refreshChatSilently() async {
     try {
       await Future.wait([
         _loadBlockedState(),
-        _loadMessages(),
+        _reloadCurrentMessageWindow(),
         _markAsRead(),
         _loadOtherUserProfile(),
         _loadMyProfile(),
@@ -186,12 +209,14 @@ class _ChatScreenState extends State<ChatScreen> {
       await _refreshChatSilently();
       if (!_chatBlocked) {
         await _setChatPresence();
+        _startPresenceHeartbeat();
       }
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _refreshing = false;
-      });
+      if (mounted) {
+        setState(() {
+          _refreshing = false;
+        });
+      }
     }
   }
 
@@ -207,8 +232,8 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     if (_chatBlocked) {
-      await _sub?.cancel();
-      _sub = null;
+      _presenceHeartbeatTimer?.cancel();
+      _typingClearTimer?.cancel();
       await _disposeRealtimeChannels();
       await _clearChatPresence();
     }
@@ -216,9 +241,18 @@ class _ChatScreenState extends State<ChatScreen> {
 
   void _handleScroll() {
     if (!_scrollController.hasClients) return;
+
     final max = _scrollController.position.maxScrollExtent;
     final current = _scrollController.offset;
     _isNearBottom = (max - current) < 80;
+
+    if (current <= 160 &&
+        !_loadingOlderMessages &&
+        !_loadingInitialMessages &&
+        _hasMoreOlderMessages &&
+        !_chatBlocked) {
+      unawaited(_loadOlderMessages());
+    }
   }
 
   void _onTextChangedForTyping() {
@@ -278,6 +312,16 @@ class _ChatScreenState extends State<ChatScreen> {
           setState(() {
             _otherIsTyping = isTyping;
           });
+
+          _typingClearTimer?.cancel();
+          if (isTyping) {
+            _typingClearTimer = Timer(const Duration(seconds: 4), () {
+              if (!mounted) return;
+              setState(() {
+                _otherIsTyping = false;
+              });
+            });
+          }
         },
       )
       ..subscribe((status, [error]) {
@@ -325,10 +369,10 @@ class _ChatScreenState extends State<ChatScreen> {
       });
   }
 
-  Future<void> _setChatPresence() async {
+  Future<void> _setChatPresence({bool silent = false}) async {
     final me = _supa.auth.currentUser;
     if (me == null || _chatBlocked) {
-      if (!mounted) return;
+      if (!mounted || silent) return;
       setState(() {
         _debugStatus = _chatBlocked
             ? 'Chat ist blockiert'
@@ -338,7 +382,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     try {
-      if (mounted) {
+      if (mounted && !silent) {
         setState(() {
           _debugStatus =
               'set_chat_presence startet: user=${me.id}, conv=${widget.conversationId}';
@@ -352,12 +396,12 @@ class _ChatScreenState extends State<ChatScreen> {
         },
       );
 
-      if (!mounted) return;
+      if (!mounted || silent) return;
       setState(() {
         _debugStatus = 'chat_presence erfolgreich gesetzt';
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || silent) return;
       setState(() {
         _debugStatus = 'set_chat_presence FEHLER: $e';
         _error = 'set_chat_presence FEHLER: $e';
@@ -426,35 +470,101 @@ class _ChatScreenState extends State<ChatScreen> {
     } catch (_) {}
   }
 
-  Future<void> _loadMessages({bool jumpToBottom = false}) async {
+  String get _messageSelectColumns =>
+      'id, conversation_id, sender_id, recipient_id, body, created_at, is_read, read_at, message_type, media_url, thumbnail_url, duration_seconds';
+
+  DateTime? get _oldestServerMessageCreatedAt {
+    final serverMessages = _messages.where((m) => !m.isLocalOnly).toList();
+    if (serverMessages.isEmpty) return null;
+
+    serverMessages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return serverMessages.first.createdAt;
+  }
+
+  DateTime? get _newestServerMessageCreatedAt {
+    final serverMessages = _messages.where((m) => !m.isLocalOnly).toList();
+    if (serverMessages.isEmpty) return null;
+
+    serverMessages.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return serverMessages.first.createdAt;
+  }
+
+  Future<List<_Msg>> _fetchLatestMessages({required int limit}) async {
+    final rows = await _supa
+        .from('messages')
+        .select(_messageSelectColumns)
+        .eq('conversation_id', widget.conversationId)
+        .order('created_at', ascending: false)
+        .limit(limit);
+
+    final list = (rows as List)
+        .map((e) => _Msg.fromRow(e as Map<String, dynamic>))
+        .toList();
+
+    list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return list;
+  }
+
+  Future<List<_Msg>> _fetchMessagesBefore({
+    required DateTime before,
+    required int limit,
+  }) async {
+    final rows = await _supa
+        .from('messages')
+        .select(_messageSelectColumns)
+        .eq('conversation_id', widget.conversationId)
+        .lt('created_at', before.toIso8601String())
+        .order('created_at', ascending: false)
+        .limit(limit);
+
+    final list = (rows as List)
+        .map((e) => _Msg.fromRow(e as Map<String, dynamic>))
+        .toList();
+
+    list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return list;
+  }
+
+  Future<List<_Msg>> _fetchMessagesAfter({
+    required DateTime after,
+    required int limit,
+  }) async {
+    final rows = await _supa
+        .from('messages')
+        .select(_messageSelectColumns)
+        .eq('conversation_id', widget.conversationId)
+        .gt('created_at', after.toIso8601String())
+        .order('created_at', ascending: true)
+        .limit(limit);
+
+    return (rows as List)
+        .map((e) => _Msg.fromRow(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> _loadInitialMessages({bool jumpToBottom = false}) async {
     if (_chatBlocked) return;
 
+    if (mounted) {
+      setState(() {
+        _loadingInitialMessages = true;
+        _error = null;
+      });
+    }
+
     try {
-      final rows = await _supa
-          .from('messages')
-          .select(
-            'id, conversation_id, sender_id, recipient_id, body, created_at, is_read, read_at, message_type, media_url, thumbnail_url, duration_seconds',
-          )
-          .eq('conversation_id', widget.conversationId)
-          .order('created_at', ascending: true);
-
-      final serverList = (rows as List)
-          .map((e) => _Msg.fromRow(e as Map<String, dynamic>))
-          .toList();
-
+      final serverList = await _fetchLatestMessages(limit: _messagePageSize);
       final merged = _mergeServerAndLocalMessages(serverList);
 
       if (!mounted) return;
-
-      final hadMessages = _messages.isNotEmpty;
-      final oldLastId = hadMessages ? _messages.last.stableIdentity : null;
-      final newLastId = merged.isNotEmpty ? merged.last.stableIdentity : null;
-      final hasNewTailMessage = oldLastId != newLastId;
 
       setState(() {
         _messages
           ..clear()
           ..addAll(merged);
+        _pruneMessageKeys();
+        _hasMoreOlderMessages = serverList.length >= _messagePageSize;
+        _loadingInitialMessages = false;
       });
 
       _scheduleScrollToPendingMessageIfNeeded();
@@ -463,18 +573,158 @@ class _ChatScreenState extends State<ChatScreen> {
           (!_initialScrollDone && _pendingScrollMessageId == null)) {
         _initialScrollDone = true;
         _scheduleBottomScroll(force: true);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Nachrichten konnten nicht geladen werden: $e';
+        _loadingInitialMessages = false;
+      });
+    }
+  }
+
+  Future<void> _reloadCurrentMessageWindow() async {
+    if (_chatBlocked) return;
+
+    try {
+      final newest = _newestServerMessageCreatedAt;
+
+      if (newest == null) {
+        await _loadInitialMessages();
         return;
       }
 
-      if (hasNewTailMessage &&
+      final newMessages = await _fetchMessagesAfter(
+        after: newest,
+        limit: _messagePageSize,
+      );
+
+      if (!mounted) return;
+
+      if (newMessages.isEmpty) {
+        return;
+      }
+
+      final oldLastId =
+          _messages.isNotEmpty ? _messages.last.stableIdentity : null;
+
+      setState(() {
+        _mergeNewMessagesIntoState(newMessages);
+      });
+
+      final newLastId =
+          _messages.isNotEmpty ? _messages.last.stableIdentity : null;
+
+      if (oldLastId != newLastId &&
           _isNearBottom &&
           _pendingScrollMessageId == null) {
         _scheduleBottomScroll(force: false);
       }
+    } catch (_) {}
+  }
+
+  Future<void> _loadOlderMessages() async {
+    if (_loadingOlderMessages || !_hasMoreOlderMessages || _chatBlocked) return;
+
+    final oldest = _oldestServerMessageCreatedAt;
+    if (oldest == null) return;
+
+    if (mounted) {
+      setState(() {
+        _loadingOlderMessages = true;
+      });
+    }
+
+    final beforePixels = _scrollController.hasClients
+        ? _scrollController.position.pixels
+        : 0.0;
+    final beforeMaxExtent = _scrollController.hasClients
+        ? _scrollController.position.maxScrollExtent
+        : 0.0;
+
+    try {
+      final older = await _fetchMessagesBefore(
+        before: oldest,
+        limit: _messagePageSize,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _mergeOlderMessagesIntoState(older);
+        _hasMoreOlderMessages = older.length >= _messagePageSize;
+        _loadingOlderMessages = false;
+      });
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scrollController.hasClients) return;
+
+        final afterMaxExtent = _scrollController.position.maxScrollExtent;
+        final diff = afterMaxExtent - beforeMaxExtent;
+        final target = beforePixels + diff;
+
+        _scrollController.jumpTo(
+          target.clamp(
+            _scrollController.position.minScrollExtent,
+            _scrollController.position.maxScrollExtent,
+          ),
+        );
+
+        if (_pendingScrollMessageId != null) {
+          _scheduleScrollToPendingMessageIfNeeded();
+        }
+      });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = 'Nachrichten konnten nicht geladen werden: $e');
+      setState(() {
+        _loadingOlderMessages = false;
+      });
     }
+  }
+
+  void _mergeOlderMessagesIntoState(List<_Msg> older) {
+    if (older.isEmpty) return;
+
+    final byId = <String, _Msg>{
+      for (final msg in _messages) msg.stableIdentity: msg,
+    };
+
+    for (final msg in older) {
+      byId[msg.stableIdentity] = msg;
+    }
+
+    final merged = byId.values.toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+    _messages
+      ..clear()
+      ..addAll(merged);
+    _pruneMessageKeys();
+  }
+
+  void _mergeNewMessagesIntoState(List<_Msg> newer) {
+    if (newer.isEmpty) return;
+
+    final byId = <String, _Msg>{
+      for (final msg in _messages) msg.stableIdentity: msg,
+    };
+
+    for (final msg in newer) {
+      byId[msg.stableIdentity] = msg;
+    }
+
+    final merged = byId.values.toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+    _messages
+      ..clear()
+      ..addAll(merged);
+    _pruneMessageKeys();
+  }
+
+  void _pruneMessageKeys() {
+    final validIds = _messages.map((m) => m.id).toSet();
+    _messageKeys.removeWhere((key, _) => !validIds.contains(key));
   }
 
   List<_Msg> _mergeServerAndLocalMessages(List<_Msg> serverList) {
@@ -485,7 +735,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
     for (final local in localOnly) {
       if (local.isSending || local.isFailed) {
-        merged.add(local);
+        final duplicateIndex = merged.indexWhere(
+          (server) => _looksLikeSameLocalMessage(local, server),
+        );
+
+        if (duplicateIndex == -1) {
+          merged.add(local);
+        }
       }
     }
 
@@ -493,56 +749,118 @@ class _ChatScreenState extends State<ChatScreen> {
     return merged;
   }
 
-  void _listenRealtime() {
+  bool _looksLikeSameLocalMessage(_Msg local, _Msg server) {
+    if (!local.isLocalOnly) return false;
+    if (local.senderId != server.senderId) return false;
+    if (local.recipientId != server.recipientId) return false;
+    if (local.messageType != server.messageType) return false;
+
+    final localBody = (local.body ?? '').trim();
+    final serverBody = (server.body ?? '').trim();
+    if (localBody != serverBody) return false;
+
+    final localMedia = (local.mediaUrl ?? '').trim();
+    final serverMedia = (server.mediaUrl ?? '').trim();
+    if (localMedia != serverMedia) return false;
+
+    final diff = local.createdAt.difference(server.createdAt).inSeconds.abs();
+    return diff <= 20;
+  }
+
+  void _applyRealtimeMessage(_Msg serverMessage) {
+    if (!mounted || _chatBlocked) return;
+
+    final wasNearBottom = _isNearBottom;
+    final oldLastId =
+        _messages.isNotEmpty ? _messages.last.stableIdentity : null;
+
+    setState(() {
+      final existingIndex = _messages.indexWhere(
+        (m) => !m.isLocalOnly && m.id == serverMessage.id,
+      );
+
+      if (existingIndex >= 0) {
+        _messages[existingIndex] = serverMessage;
+      } else {
+        _messages.removeWhere(
+          (m) => m.isLocalOnly && _looksLikeSameLocalMessage(m, serverMessage),
+        );
+        _messages.add(serverMessage);
+      }
+
+      _messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      _pruneMessageKeys();
+    });
+
+    final newLastId =
+        _messages.isNotEmpty ? _messages.last.stableIdentity : null;
+    final hasNewTailMessage = oldLastId != newLastId;
+
+    _scheduleScrollToPendingMessageIfNeeded();
+
+    if (hasNewTailMessage && wasNearBottom && _pendingScrollMessageId == null) {
+      _scheduleBottomScroll(force: false);
+    }
+  }
+
+  Future<void> _listenRealtime() async {
     if (_chatBlocked) return;
 
-    _sub?.cancel();
+    if (_messagesChannel != null) {
+      await _supa.removeChannel(_messagesChannel!);
+      _messagesChannel = null;
+    }
 
-    _sub = _supa.from('messages').stream(primaryKey: ['id']).listen((rows) async {
-      if (_chatBlocked) return;
+    _messagesChannel = _supa.channel('messages-${widget.conversationId}')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'messages',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'conversation_id',
+          value: widget.conversationId,
+        ),
+        callback: (payload) async {
+          if (!mounted || _chatBlocked) return;
 
-      final filtered = rows.where((r) {
-        final row = r as Map<String, dynamic>;
-        return row['conversation_id']?.toString() == widget.conversationId;
-      }).toList();
+          final newRecord = payload.newRecord;
+          final oldRecord = payload.oldRecord;
+          final row = newRecord.isNotEmpty ? newRecord : oldRecord;
 
-      final serverList =
-          filtered.map((r) => _Msg.fromRow(r as Map<String, dynamic>)).toList();
+          final conversationId = row['conversation_id']?.toString();
+          if (conversationId != widget.conversationId) return;
 
-      final merged = _mergeServerAndLocalMessages(serverList);
+          if (newRecord.isEmpty) {
+            await _reloadCurrentMessageWindow();
+            return;
+          }
 
-      if (!mounted) return;
+          try {
+            final serverMessage = _Msg.fromRow(newRecord);
+            _applyRealtimeMessage(serverMessage);
+            await _markAsRead();
+          } catch (e) {
+            debugPrint('messages realtime parse failed, fallback reload: $e');
+            await _reloadCurrentMessageWindow();
+            await _markAsRead();
+          }
+        },
+      )
+      ..subscribe((status, [error]) async {
+        debugPrint(
+          '[ChatScreen] messages realtime status: $status error=$error',
+        );
 
-      final hadMessages = _messages.isNotEmpty;
-      final oldLastId = hadMessages ? _messages.last.stableIdentity : null;
-      final newLastId = merged.isNotEmpty ? merged.last.stableIdentity : null;
-      final hasNewTailMessage = oldLastId != newLastId;
+        if (!mounted || _chatBlocked) return;
 
-      final sameLength = _messages.length == merged.length;
-      final sameLastId = oldLastId == newLastId;
+        final statusText = status.toString().toLowerCase();
+        final isReady = statusText.contains('subscribed');
 
-      if (sameLength && sameLastId) {
-        await _markAsRead();
-        _scheduleScrollToPendingMessageIfNeeded();
-        return;
-      }
-
-      setState(() {
-        _messages
-          ..clear()
-          ..addAll(merged);
+        if (isReady) {
+          await _refreshChatSilently();
+        }
       });
-
-      _scheduleScrollToPendingMessageIfNeeded();
-
-      if (hasNewTailMessage &&
-          _isNearBottom &&
-          _pendingScrollMessageId == null) {
-        _scheduleBottomScroll(force: false);
-      }
-
-      await _markAsRead();
-    });
   }
 
   void _scheduleBottomScroll({required bool force}) {
@@ -585,6 +903,9 @@ class _ChatScreenState extends State<ChatScreen> {
     final context = key?.currentContext;
 
     if (context == null) {
+      if (_hasMoreOlderMessages && !_loadingOlderMessages) {
+        unawaited(_loadOlderMessages());
+      }
       return;
     }
 
@@ -618,6 +939,7 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _messages.add(message);
       _messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      _pruneMessageKeys();
     });
     _scheduleBottomScroll(force: true);
   }
@@ -626,6 +948,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!mounted) return;
     setState(() {
       _messages.removeWhere((m) => m.localKey == localKey);
+      _pruneMessageKeys();
     });
   }
 
@@ -684,7 +1007,7 @@ class _ChatScreenState extends State<ChatScreen> {
       });
 
       _removeLocalMessage(localKey);
-      await _loadMessages(jumpToBottom: true);
+      await _reloadCurrentMessageWindow();
       await _markAsRead();
       await _setChatPresence();
 
@@ -821,7 +1144,7 @@ class _ChatScreenState extends State<ChatScreen> {
       });
 
       _removeLocalMessage(localKey);
-      await _loadMessages(jumpToBottom: true);
+      await _reloadCurrentMessageWindow();
       await _markAsRead();
       await _setChatPresence();
 
@@ -929,7 +1252,7 @@ class _ChatScreenState extends State<ChatScreen> {
       });
 
       _removeLocalMessage(localKey);
-      await _loadMessages(jumpToBottom: true);
+      await _reloadCurrentMessageWindow();
       await _markAsRead();
       await _setChatPresence();
 
@@ -988,7 +1311,7 @@ class _ChatScreenState extends State<ChatScreen> {
       }
 
       _removeLocalMessage(localKey);
-      await _loadMessages(jumpToBottom: true);
+      await _reloadCurrentMessageWindow();
       await _markAsRead();
       await _setChatPresence();
     } catch (e) {
@@ -1002,6 +1325,7 @@ class _ChatScreenState extends State<ChatScreen> {
       setState(() {
         _chatBlocked = true;
       });
+      _presenceHeartbeatTimer?.cancel();
       _showSnack('Dieser Chat wurde blockiert.');
       return;
     }
@@ -1094,6 +1418,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void _goHome() {
     PushService.setCurrentOpenConversation(null);
     PushService.registerScrollToMessageCallback(null);
+    _presenceHeartbeatTimer?.cancel();
     unawaited(_clearChatPresence());
     Navigator.pushNamedAndRemoveUntil(context, '/home', (_) => false);
   }
@@ -1101,6 +1426,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _openOtherProfile() async {
     PushService.setCurrentOpenConversation(null);
     PushService.registerScrollToMessageCallback(null);
+    _presenceHeartbeatTimer?.cancel();
 
     final blocked = await Navigator.of(context).push<bool>(
           MaterialPageRoute(
@@ -1126,11 +1452,16 @@ class _ChatScreenState extends State<ChatScreen> {
       _loadOtherUserProfile(),
       _loadBlockedState(),
     ]);
+
+    if (!_chatBlocked) {
+      _startPresenceHeartbeat();
+    }
   }
 
   Future<void> _openMyProfile() async {
     PushService.setCurrentOpenConversation(null);
     PushService.registerScrollToMessageCallback(null);
+    _presenceHeartbeatTimer?.cancel();
 
     await Navigator.pushNamed(context, '/profile-edit');
 
@@ -1142,6 +1473,10 @@ class _ChatScreenState extends State<ChatScreen> {
       _loadMyProfile(),
       _loadBlockedState(),
     ]);
+
+    if (!_chatBlocked) {
+      _startPresenceHeartbeat();
+    }
   }
 
   void _jumpToBottom() {
@@ -1163,8 +1498,9 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   String _formatTime(DateTime dt) {
-    final h = dt.hour.toString().padLeft(2, '0');
-    final m = dt.minute.toString().padLeft(2, '0');
+    final local = dt.toLocal();
+    final h = local.hour.toString().padLeft(2, '0');
+    final m = local.minute.toString().padLeft(2, '0');
     return '$h:$m';
   }
 
@@ -1195,7 +1531,8 @@ class _ChatScreenState extends State<ChatScreen> {
             SizedBox(width: 6),
             Text(
               'Wird gesendet...',
-              style: TextStyle(fontSize: 11, color: Colors.black54),
+              style: TextStyle(fontSize: 11,
+                                  letterSpacing: 0.2, color: Colors.black54),
             ),
           ],
         );
@@ -1213,6 +1550,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 'Fehlgeschlagen • Tippen zum Wiederholen',
                 style: TextStyle(
                   fontSize: 11,
+                                  letterSpacing: 0.2,
                   color: Colors.red,
                   fontWeight: FontWeight.w600,
                 ),
@@ -1230,6 +1568,7 @@ class _ChatScreenState extends State<ChatScreen> {
           _formatTime(m.createdAt),
           style: const TextStyle(
             fontSize: 11,
+                                  letterSpacing: 0.2,
             color: Colors.black54,
           ),
         ),
@@ -1245,6 +1584,7 @@ class _ChatScreenState extends State<ChatScreen> {
             m.isRead ? 'Gelesen' : 'Gesendet',
             style: TextStyle(
               fontSize: 11,
+                                  letterSpacing: 0.2,
               color: m.isRead ? Colors.blue : Colors.black54,
               fontWeight: FontWeight.w500,
             ),
@@ -1304,9 +1644,9 @@ class _ChatScreenState extends State<ChatScreen> {
           width: double.infinity,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.black.withOpacity(0.08)),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1329,7 +1669,7 @@ class _ChatScreenState extends State<ChatScreen> {
               Text(
                 'Du kannst keine Nachrichten mehr senden oder empfangen.',
                 style: TextStyle(
-                  color: Colors.black.withOpacity(0.68),
+                  color: Colors.black.withValues(alpha: 0.68),
                   fontWeight: FontWeight.w600,
                 ),
                 textAlign: TextAlign.center,
@@ -1345,6 +1685,38 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOlderLoader() {
+    if (!_loadingOlderMessages) {
+      if (!_hasMoreOlderMessages) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Text(
+            'Keine älteren Nachrichten mehr.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.black.withValues(alpha: 0.45),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        );
+      }
+
+      return const SizedBox(height: 8);
+    }
+
+    return const Padding(
+      padding: EdgeInsets.symmetric(vertical: 12),
+      child: Center(
+        child: SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(strokeWidth: 2),
         ),
       ),
     );
@@ -1424,7 +1796,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             ? Colors.redAccent
                             : _otherIsTyping
                                 ? Colors.greenAccent
-                                : Colors.white.withOpacity(0.85),
+                                : Colors.white.withValues(alpha: 0.85),
                         fontWeight: FontWeight.w500,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -1484,7 +1856,7 @@ class _ChatScreenState extends State<ChatScreen> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              color: Colors.amber.withOpacity(0.2),
+              color: Colors.amber.withValues(alpha: 0.28),
               child: Text(
                 _debugStatus!,
                 style: const TextStyle(fontSize: 12),
@@ -1495,11 +1867,11 @@ class _ChatScreenState extends State<ChatScreen> {
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
               child: Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.04),
+                  color: Colors.black.withValues(alpha: 0.04),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.black.withOpacity(0.08)),
+                  border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
                 ),
                 child: Row(
                   children: [
@@ -1509,7 +1881,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       child: Text(
                         'Du kannst in ${_formatWait(_cooldownSeconds)} wieder senden.',
                         style: TextStyle(
-                          color: Colors.black.withOpacity(0.75),
+                          color: Colors.black.withValues(alpha: 0.75),
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -1529,62 +1901,71 @@ class _ChatScreenState extends State<ChatScreen> {
           Expanded(
             child: _chatBlocked
                 ? _buildBlockedView()
-                : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(12),
-                    reverse: false,
-                    itemCount: _messages.length,
-                    itemBuilder: (context, i) {
-                      final m = _messages[i];
-                      final isMe = m.senderId == _myId;
-                      final isLastOwn = isMe && _isLastOwnMessage(m);
+                : _loadingInitialMessages
+                    ? const Center(child: CircularProgressIndicator())
+                    : ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.all(16),
+                        reverse: false,
+                        itemCount: _messages.length + 1,
+                        itemBuilder: (context, i) {
+                          if (i == 0) {
+                            return _buildOlderLoader();
+                          }
 
-                      final key = _messageKeys.putIfAbsent(
-                        m.id,
-                        () => GlobalKey(debugLabel: 'msg_${m.id}'),
-                      );
+                          final m = _messages[i - 1];
+                          final isMe = m.senderId == _myId;
+                          final isLastOwn = isMe && _isLastOwnMessage(m);
 
-                      final isHighlighted = _highlightMessageId == m.id;
+                          final key = _messageKeys.putIfAbsent(
+                            m.id,
+                            () => GlobalKey(debugLabel: 'msg_${m.id}'),
+                          );
 
-                      return Align(
-                        key: key,
-                        alignment:
-                            isMe ? Alignment.centerRight : Alignment.centerLeft,
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 250),
-                          margin: const EdgeInsets.symmetric(vertical: 4),
-                          padding: const EdgeInsets.all(12),
-                          constraints: const BoxConstraints(maxWidth: 280),
-                          decoration: BoxDecoration(
-                            color: isHighlighted
-                                ? Colors.yellow.shade200
-                                : (isMe
-                                    ? Colors.pink.shade100
-                                    : Colors.grey.shade300),
-                            borderRadius: BorderRadius.circular(16),
-                            border: m.isFailed
-                                ? Border.all(color: Colors.red.withOpacity(0.4))
-                                : (isHighlighted
+                          final isHighlighted = _highlightMessageId == m.id;
+
+                          return Align(
+                            key: key,
+                            alignment: isMe
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 250),
+                              margin: const EdgeInsets.symmetric(vertical: 4),
+                              padding: const EdgeInsets.all(16),
+                              constraints: const BoxConstraints(maxWidth: 280),
+                              decoration: BoxDecoration(
+                                color: isHighlighted
+                                    ? Colors.yellow.shade200
+                                    : (isMe
+                                        ? Colors.pink.shade100
+                                        : Colors.grey.shade300),
+                                borderRadius: BorderRadius.circular(32),
+                                border: m.isFailed
                                     ? Border.all(
-                                        color: Colors.orange,
-                                        width: 1.5,
+                                        color: Colors.red.withValues(alpha: 0.4),
                                       )
-                                    : null),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: isMe
-                                ? CrossAxisAlignment.end
-                                : CrossAxisAlignment.start,
-                            children: [
-                              _buildMessageContent(m),
-                              const SizedBox(height: 4),
-                              _buildStatusRow(m, isLastOwn),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+                                    : (isHighlighted
+                                        ? Border.all(
+                                            color: Colors.orange,
+                                            width: 1.5,
+                                          )
+                                        : null),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: isMe
+                                    ? CrossAxisAlignment.end
+                                    : CrossAxisAlignment.start,
+                                children: [
+                                  _buildMessageContent(m),
+                                  const SizedBox(height: 4),
+                                  _buildStatusRow(m, isLastOwn),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
           ),
           if (!_chatBlocked)
             SafeArea(
@@ -1624,7 +2005,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                     const SizedBox(width: 8),
                     IconButton(
-                      icon: const Icon(Icons.send),
+                      icon: const Icon(Icons.send_rounded),
                       onPressed: sendDisabled ? null : _send,
                     ),
                   ],
@@ -1687,29 +2068,47 @@ class _VideoBubble extends StatefulWidget {
 class _VideoBubbleState extends State<_VideoBubble> {
   VideoPlayerController? _videoController;
   bool _ready = false;
+  bool _initializing = false;
+  bool _started = false;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _init();
   }
 
   Future<void> _init() async {
-    if (widget.url.isEmpty) return;
-
-    final controller = VideoPlayerController.networkUrl(Uri.parse(widget.url));
-    await controller.initialize();
-    controller.setLooping(false);
-
-    if (!mounted) {
-      await controller.dispose();
-      return;
-    }
+    if (widget.url.isEmpty || _initializing || _ready) return;
 
     setState(() {
-      _videoController = controller;
-      _ready = true;
+      _initializing = true;
+      _started = true;
+      _error = null;
     });
+
+    try {
+      final controller = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+      await controller.initialize();
+      controller.setLooping(false);
+
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+
+      setState(() {
+        _videoController = controller;
+        _ready = true;
+        _initializing = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _ready = false;
+        _initializing = false;
+      });
+    }
   }
 
   @override
@@ -1720,6 +2119,36 @@ class _VideoBubbleState extends State<_VideoBubble> {
 
   @override
   Widget build(BuildContext context) {
+    if (_error != null) {
+      return Container(
+        width: 220,
+        height: 140,
+        color: Colors.black12,
+        alignment: Alignment.center,
+        child: const Text('Video konnte nicht geladen werden'),
+      );
+    }
+
+    if (!_started) {
+      return GestureDetector(
+        onTap: _init,
+        child: Container(
+          width: 220,
+          height: 140,
+          decoration: BoxDecoration(
+            color: Colors.black12,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          alignment: Alignment.center,
+          child: const Icon(
+            Icons.play_circle_fill,
+            size: 54,
+            color: Colors.black54,
+          ),
+        ),
+      );
+    }
+
     if (!_ready || _videoController == null) {
       return Container(
         width: 220,
@@ -1755,7 +2184,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
                     width: 52,
                     height: 52,
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.45),
+                      color: Colors.black.withValues(alpha: 0.45),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
@@ -1781,7 +2210,7 @@ class _FullScreenImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: Colors.black.withValues(alpha: 0.72),
       appBar: AppBar(backgroundColor: Colors.black),
       body: Center(
         child: InteractiveViewer(
@@ -1847,7 +2276,9 @@ class _Msg {
       messageType: (row['message_type'] ?? 'text').toString(),
       mediaUrl: row['media_url']?.toString(),
       thumbnailUrl: row['thumbnail_url']?.toString(),
-      durationSeconds: row['duration_seconds'] as int?,
+      durationSeconds: row['duration_seconds'] is int
+          ? row['duration_seconds'] as int
+          : int.tryParse((row['duration_seconds'] ?? '').toString()),
       isLocalOnly: false,
       isSending: false,
       isFailed: false,
@@ -1925,6 +2356,7 @@ class _Msg {
       isSending: isSending ?? this.isSending,
       isFailed: isFailed ?? this.isFailed,
       localError: localError ?? this.localError,
+    
     );
   }
 

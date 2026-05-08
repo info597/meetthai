@@ -14,7 +14,7 @@ class ChatListScreen extends StatefulWidget {
   State<ChatListScreen> createState() => _ChatListScreenState();
 }
 
-class _ChatListScreenState extends State<ChatListScreen> {
+class _ChatListScreenState extends State<ChatListScreen> with WidgetsBindingObserver {
   final SupabaseClient _supa = Supabase.instance.client;
 
   bool _loading = true;
@@ -34,14 +34,26 @@ class _ChatListScreenState extends State<ChatListScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _bootstrap();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _reloadDebounce?.cancel();
     _unsubscribeRealtime();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    if (state == AppLifecycleState.resumed) {
+      _scheduleBackgroundReload();
+      _startRealtime();
+    }
   }
 
   Future<void> _bootstrap() async {
@@ -60,8 +72,21 @@ class _ChatListScreenState extends State<ChatListScreen> {
         event: PostgresChangeEvent.all,
         schema: 'public',
         table: 'messages',
-        callback: (_) {
-          _scheduleBackgroundReload();
+        callback: (payload) {
+          final row = payload.newRecord.isNotEmpty
+              ? payload.newRecord
+              : payload.oldRecord;
+
+          final conversationId = row['conversation_id']?.toString();
+          if (conversationId == null || conversationId.isEmpty) return;
+
+          final affectsVisibleChat = _items.any(
+            (item) => item.conversationId == conversationId,
+          );
+
+          if (affectsVisibleChat || payload.eventType == PostgresChangeEvent.insert) {
+            _scheduleBackgroundReload();
+          }
         },
       )
       ..onPostgresChanges(
@@ -82,7 +107,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     _chatListChannel = null;
 
     if (channel != null) {
-      _supa.removeChannel(channel);
+      unawaited(_supa.removeChannel(channel));
     }
   }
 
@@ -228,6 +253,32 @@ class _ChatListScreenState extends State<ChatListScreen> {
     }
   }
 
+  String _formatLastMessageTime(DateTime? dt) {
+    if (dt == null) return '';
+
+    final local = dt.toLocal();
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final msgDay = DateTime(local.year, local.month, local.day);
+
+    if (msgDay == today) {
+      final h = local.hour.toString().padLeft(2, '0');
+      final m = local.minute.toString().padLeft(2, '0');
+      return '$h:$m';
+    }
+
+    final diffDays = today.difference(msgDay).inDays;
+    if (diffDays == 1) {
+      if (_t.isGerman) return 'Gestern';
+      if (_t.isThai) return 'เมื่อวาน';
+      return 'Yesterday';
+    }
+
+    final d = local.day.toString().padLeft(2, '0');
+    final mo = local.month.toString().padLeft(2, '0');
+    return '$d.$mo.';
+  }
+
   Widget _buildLoggedOutState() {
     return Scaffold(
       appBar: AppBar(title: Text(_t.chats)),
@@ -254,17 +305,41 @@ class _ChatListScreenState extends State<ChatListScreen> {
   }
 
   Widget _buildEmptyState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Text(
-          _t.isGerman
-              ? 'Noch keine Chats.\nSobald du ein Match hast, erscheint es hier.'
-              : _t.isThai
-                  ? 'ยังไม่มีแชต\nเมื่อคุณมีแมตช์ แชตจะปรากฏที่นี่'
-                  : 'No chats yet.\nAs soon as you have a match, it will appear here.',
-          textAlign: TextAlign.center,
-        ),
+    return RefreshIndicator(
+      onRefresh: _refreshAll,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          SizedBox(
+            height: MediaQuery.of(context).size.height * 0.62,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.chat_bubble_outline_rounded, size: 48),
+                    const SizedBox(height: 12),
+                    Text(
+                      _t.isGerman
+                          ? 'Noch keine Chats.\nSobald du ein Match hast, erscheint es hier.'
+                          : _t.isThai
+                              ? 'ยังไม่มีแชต\nเมื่อคุณมีแมตช์ แชตจะปรากฏที่นี่'
+                              : 'No chats yet.\nAs soon as you have a match, it will appear here.',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 14),
+                    OutlinedButton.icon(
+                      onPressed: _refreshAll,
+                      icon: const Icon(Icons.refresh_rounded),
+                      label: Text(_t.refresh),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -283,6 +358,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
           final avatar = (c.otherAvatarUrl ?? '').trim();
           final subtitle = _formatSubtitle(c);
           final unread = c.unreadCount;
+          final timeLabel = _formatLastMessageTime(c.lastMessageAt);
 
           return ListTile(
             contentPadding: const EdgeInsets.symmetric(
@@ -330,7 +406,23 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 ),
               ),
             ),
-            trailing: const Icon(Icons.chevron_right),
+            trailing: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (timeLabel.isNotEmpty)
+                  Text(
+                    timeLabel,
+                    style: TextStyle(
+                      color: unread > 0 ? Colors.pink : Colors.black45,
+                      fontWeight: unread > 0 ? FontWeight.w700 : FontWeight.w500,
+                      fontSize: 12,
+                    ),
+                  ),
+                const SizedBox(height: 4),
+                const Icon(Icons.chevron_right, size: 20),
+              ],
+            ),
             onTap: () => _openChat(c),
           );
         },

@@ -1,5 +1,4 @@
 import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -17,16 +16,18 @@ class LikesScreen extends StatefulWidget {
   State<LikesScreen> createState() => _LikesScreenState();
 }
 
-class _LikesScreenState extends State<LikesScreen> {
+class _LikesScreenState extends State<LikesScreen> with WidgetsBindingObserver {
   final _supa = Supabase.instance.client;
   final _subscription = SubscriptionState.instance;
 
-  static const int _freeVisibleLikesCount = 10;
-  static const int _premiumVisibleLikesCount = 25;
+  static const int _freeVisibleLikesCount = 20;
+  static const int _premiumVisibleLikesCount = 50;
 
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _likes = [];
+  int _newLikesCount = 0;
+  DateTime? _likesSeenAtBeforeOpen;
 
   bool get _isPremium => _subscription.isPremium;
   bool get _isGold => _subscription.isGold;
@@ -43,28 +44,70 @@ class _LikesScreenState extends State<LikesScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _subscription.addListener(_onSubscriptionChanged);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
+      
       await _refreshScreen();
     });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _subscription.removeListener(_onSubscriptionChanged);
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    if (state == AppLifecycleState.resumed && mounted) {
+      _refreshScreen();
+    }
+  }
+
   void _onSubscriptionChanged() {
-    if (!mounted) return;
+    
     setState(() {});
   }
 
   Future<void> _refreshScreen() async {
     await _subscription.refresh();
     await _load();
+  }
+
+  Future<Set<String>> _loadBlockedUserIds() async {
+    final me = _supa.auth.currentUser;
+    if (me == null) return <String>{};
+
+    try {
+      final rows = await _supa
+          .from('user_blocks')
+          .select('blocker_user_id, blocked_user_id')
+          .or('blocker_user_id.eq.$me.id,blocked_user_id.eq.$me.id');
+
+      final blocked = <String>{};
+
+      for (final row in (rows as List).cast<Map<String, dynamic>>()) {
+        final blocker = row['blocker_user_id']?.toString();
+        final blockedUser = row['blocked_user_id']?.toString();
+
+        if (blocker == me.id && blockedUser != null && blockedUser.isNotEmpty) {
+          blocked.add(blockedUser);
+        } else if (blockedUser == me.id &&
+            blocker != null &&
+            blocker.isNotEmpty) {
+          blocked.add(blocker);
+        }
+      }
+
+      return blocked;
+    } catch (_) {
+      return <String>{};
+    }
   }
 
   Future<Set<String>> _loadDeletedUserIds() async {
@@ -95,6 +138,54 @@ class _LikesScreenState extends State<LikesScreen> {
     }
   }
 
+
+  DateTime? _parseDateTime(dynamic value) {
+    if (value == null) return null;
+    final text = value.toString().trim();
+    if (text.isEmpty) return null;
+    return DateTime.tryParse(text);
+  }
+
+  String _relativeLikeTime(dynamic value) {
+    final likedAt = _parseDateTime(value);
+    if (likedAt == null) {
+      if (_t.isGerman) return 'Gerade eben';
+      if (_t.isThai) return 'เมื่อสักครู่';
+      return 'Just now';
+    }
+
+    final diff = DateTime.now().toUtc().difference(likedAt.toUtc());
+    if (diff.inMinutes < 1) {
+      if (_t.isGerman) return 'Gerade eben';
+      if (_t.isThai) return 'เมื่อสักครู่';
+      return 'Just now';
+    }
+    if (diff.inHours < 1) {
+      final m = diff.inMinutes;
+      if (_t.isGerman) return 'vor $m Min.';
+      if (_t.isThai) return '$m นาทีที่แล้ว';
+      return '${m}m ago';
+    }
+    if (diff.inDays < 1) {
+      final h = diff.inHours;
+      if (_t.isGerman) return 'vor $h Std.';
+      if (_t.isThai) return '$h ชม.ที่แล้ว';
+      return '${h}h ago';
+    }
+    final d = diff.inDays;
+    if (_t.isGerman) return 'vor $d Tg.';
+    if (_t.isThai) return '$d วันที่แล้ว';
+    return '${d}d ago';
+  }
+
+  bool _isNewLike(Map<String, dynamic> item) {
+    final seenAt = _likesSeenAtBeforeOpen;
+    if (seenAt == null) return true;
+    final likedAt = _parseDateTime(item['liked_at'] ?? item['created_at']);
+    if (likedAt == null) return false;
+    return likedAt.toUtc().isAfter(seenAt.toUtc());
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
@@ -107,29 +198,73 @@ class _LikesScreenState extends State<LikesScreen> {
         throw Exception(_t.loginRequired);
       }
 
+      final profileRow = await _supa
+          .from('profiles')
+          .select('likes_seen_at')
+          .eq('user_id', me.id)
+          .maybeSingle();
+      final likesSeenAt = _parseDateTime(profileRow?['likes_seen_at']);
+
       final likesRes = await _supa.rpc('get_my_likes_preview');
+      final blockedUserIds = await _loadBlockedUserIds();
       final deletedUserIds = await _loadDeletedUserIds();
 
       final allLikes = List<Map<String, dynamic>>.from(likesRes ?? []);
-      final filteredLikes = allLikes.where((item) {
-        final userId = (item['user_id'] ?? '').toString().trim();
-        if (userId.isEmpty) return false;
-        return !deletedUserIds.contains(userId);
-      }).toList();
+      final seenUserIds = <String>{};
+      final filteredLikes = <Map<String, dynamic>>[];
 
-      if (!mounted) return;
+      for (final item in allLikes) {
+        final userId = (item['user_id'] ?? '').toString().trim();
+
+        if (userId.isEmpty) continue;
+        if (seenUserIds.contains(userId)) continue;
+        if (blockedUserIds.contains(userId)) continue;
+        if (deletedUserIds.contains(userId)) continue;
+
+        seenUserIds.add(userId);
+        filteredLikes.add(item);
+      }
+
+      final newLikesCount = likesSeenAt == null
+          ? filteredLikes.length
+          : filteredLikes.where((item) {
+              final likedAt = _parseDateTime(item['liked_at'] ?? item['created_at']);
+              return likedAt != null && likedAt.toUtc().isAfter(likesSeenAt.toUtc());
+            }).length;
+
+      await _markLikesAsSeen();
+
+      
 
       setState(() {
         _likes = filteredLikes;
+        _newLikesCount = newLikesCount < 0 ? 0 : newLikesCount;
+        _likesSeenAtBeforeOpen = likesSeenAt;
         _loading = false;
       });
     } catch (e) {
-      if (!mounted) return;
+      
       setState(() {
         _error =
             '${_t.isGerman ? 'Likes konnten nicht geladen werden' : _t.isThai ? 'ไม่สามารถโหลดไลก์ได้' : 'Likes could not be loaded'}: $e';
         _loading = false;
       });
+    }
+  }
+
+
+  Future<void> _markLikesAsSeen() async {
+    final me = _supa.auth.currentUser;
+    if (me == null) return;
+
+    try {
+      final now = DateTime.now().toUtc().toIso8601String();
+      await _supa.from('profiles').update({
+        'likes_seen_at': now,
+        'updated_at': now,
+      }).eq('user_id', me.id);
+    } catch (_) {
+      // Likes should still load even if marking as seen fails.
     }
   }
 
@@ -139,7 +274,7 @@ class _LikesScreenState extends State<LikesScreen> {
       MaterialPageRoute(builder: (_) => const UpgradeScreen()),
     );
 
-    if (!mounted) return;
+    
 
     if (changed == true) {
       await _refreshScreen();
@@ -171,6 +306,35 @@ class _LikesScreenState extends State<LikesScreen> {
       return;
     }
 
+    final blockedUserIds = await _loadBlockedUserIds();
+    final deletedUserIds = await _loadDeletedUserIds();
+
+    if (blockedUserIds.contains(userId) || deletedUserIds.contains(userId)) {
+      
+
+      setState(() {
+        _likes.removeWhere(
+          (item) => (item['user_id'] ?? '').toString() == userId,
+        );
+      });
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _t.isGerman
+                ? 'Dieses Profil ist nicht mehr verfügbar.'
+                : _t.isThai
+                    ? 'โปรไฟล์นี้ไม่พร้อมใช้งานแล้ว'
+                    : 'This profile is no longer available.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (!context.mounted) return;
+
     final blocked = await Navigator.of(context).push<bool>(
           MaterialPageRoute(
             builder: (_) => UserProfileScreen(userId: userId),
@@ -178,7 +342,7 @@ class _LikesScreenState extends State<LikesScreen> {
         ) ??
         false;
 
-    if (!mounted) return;
+    
 
     if (blocked == true) {
       setState(() {
@@ -187,6 +351,7 @@ class _LikesScreenState extends State<LikesScreen> {
         );
       });
 
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -270,31 +435,31 @@ class _LikesScreenState extends State<LikesScreen> {
 
     if (_isPromoPremium) {
       if (_t.isGerman) {
-        return 'Mit deinem Gratis Premium kannst du die ersten 25 Likes normal sehen und beantworten. Weitere Likes werden gesperrt angezeigt.';
+        return 'Mit deinem Gratis Premium kannst du die ersten 50 Likes normal sehen und beantworten. Weitere Likes werden gesperrt angezeigt.';
       }
       if (_t.isThai) {
-        return 'ด้วย Premium ฟรีของคุณ คุณสามารถเห็นและตอบกลับ 25 ไลก์แรกได้ตามปกติ ไลก์เพิ่มเติมจะถูกล็อกไว้';
+        return 'ด้วย Premium ฟรีของคุณ คุณสามารถเห็นและตอบกลับ 50 ไลก์แรกได้ตามปกติ ไลก์เพิ่มเติมจะถูกล็อกไว้';
       }
-      return 'With your free Premium, you can normally see and answer the first 25 likes. Additional likes stay locked.';
+      return 'With your free Premium, you can normally see and answer the first 50 likes. Additional likes stay locked.';
     }
 
     if (_isPremium) {
       if (_t.isGerman) {
-        return 'Als Premium User kannst du die ersten 25 Likes normal sehen und beantworten. Weitere Likes werden gesperrt angezeigt.';
+        return 'Als Premium User kannst du die ersten 50 Likes normal sehen und beantworten. Weitere Likes werden gesperrt angezeigt.';
       }
       if (_t.isThai) {
-        return 'ในฐานะผู้ใช้ Premium คุณสามารถเห็นและตอบกลับ 25 ไลก์แรกได้ตามปกติ ไลก์เพิ่มเติมจะถูกล็อกไว้';
+        return 'ในฐานะผู้ใช้ Premium คุณสามารถเห็นและตอบกลับ 50 ไลก์แรกได้ตามปกติ ไลก์เพิ่มเติมจะถูกล็อกไว้';
       }
-      return 'As a Premium user, you can normally see and answer the first 25 likes. Additional likes stay locked.';
+      return 'As a Premium user, you can normally see and answer the first 50 likes. Additional likes stay locked.';
     }
 
     if (_t.isGerman) {
-      return 'Als Free User kannst du die ersten 10 Likes normal sehen und beantworten. Weitere Likes werden gesperrt angezeigt.';
+      return 'Als Free User kannst du die ersten 20 Likes normal sehen und beantworten. Weitere Likes werden gesperrt angezeigt.';
     }
     if (_t.isThai) {
-      return 'ในฐานะผู้ใช้ฟรี คุณสามารถเห็นและตอบกลับ 10 ไลก์แรกได้ตามปกติ ไลก์เพิ่มเติมจะถูกล็อกไว้';
+      return 'ในฐานะผู้ใช้ฟรี คุณสามารถเห็นและตอบกลับ 20 ไลก์แรกได้ตามปกติ ไลก์เพิ่มเติมจะถูกล็อกไว้';
     }
-    return 'As a free user, you can normally see and answer the first 10 likes. Additional likes stay locked.';
+    return 'As a free user, you can normally see and answer the first 20 likes. Additional likes stay locked.';
   }
 
   String get _heroButtonText {
@@ -305,14 +470,14 @@ class _LikesScreenState extends State<LikesScreen> {
     }
 
     if (_isPremium) {
-      if (_t.isGerman) return 'Mehr als 25 Likes freischalten';
-      if (_t.isThai) return 'ปลดล็อกมากกว่า 25 ไลก์';
-      return 'Unlock more than 25 likes';
+      if (_t.isGerman) return 'Mehr als 50 Likes freischalten';
+      if (_t.isThai) return 'ปลดล็อกมากกว่า 50 ไลก์';
+      return 'Unlock more than 50 likes';
     }
 
-    if (_t.isGerman) return 'Mehr als 10 Likes freischalten';
-    if (_t.isThai) return 'ปลดล็อกมากกว่า 10 ไลก์';
-    return 'Unlock more than 10 likes';
+    if (_t.isGerman) return 'Mehr als 20 Likes freischalten';
+    if (_t.isThai) return 'ปลดล็อกมากกว่า 20 ไลก์';
+    return 'Unlock more than 20 likes';
   }
 
   String get _stripVisibilityText {
@@ -322,25 +487,25 @@ class _LikesScreenState extends State<LikesScreen> {
       return 'All likes visible';
     }
     if (_isPremium) {
-      if (_t.isGerman) return '25 Likes sichtbar';
-      if (_t.isThai) return 'เห็น 25 ไลก์';
-      return '25 likes visible';
+      if (_t.isGerman) return '50 Likes sichtbar';
+      if (_t.isThai) return 'เห็น 50 ไลก์';
+      return '50 likes visible';
     }
-    if (_t.isGerman) return '10 Likes sichtbar';
-    if (_t.isThai) return 'เห็น 10 ไลก์';
-    return '10 likes visible';
+    if (_t.isGerman) return '20 Likes sichtbar';
+    if (_t.isThai) return 'เห็น 20 ไลก์';
+    return '20 likes visible';
   }
 
   String get _lockedOverlayTitle {
     if (_isPremium) {
-      if (_t.isGerman) return 'Mehr als 25 Likes';
-      if (_t.isThai) return 'มากกว่า 25 ไลก์';
-      return 'More than 25 likes';
+      if (_t.isGerman) return 'Mehr als 50 Likes';
+      if (_t.isThai) return 'มากกว่า 50 ไลก์';
+      return 'More than 50 likes';
     }
 
-    if (_t.isGerman) return 'Mehr als 10 Likes';
-    if (_t.isThai) return 'มากกว่า 10 ไลก์';
-    return 'More than 10 likes';
+    if (_t.isGerman) return 'Mehr als 20 Likes';
+    if (_t.isThai) return 'มากกว่า 20 ไลก์';
+    return 'More than 20 likes';
   }
 
   String get _lockedOverlaySubtitle {
@@ -374,26 +539,26 @@ class _LikesScreenState extends State<LikesScreen> {
           end: Alignment.bottomRight,
           colors: _isGold
               ? [
-                  Colors.amber.withOpacity(0.20),
-                  Colors.orange.withOpacity(0.10),
+                  Colors.amber.withValues(alpha: 0.20),
+                  Colors.orange.withValues(alpha: 0.10),
                 ]
               : _isPremium
                   ? [
-                      Colors.pink.withOpacity(0.18),
-                      Colors.deepPurple.withOpacity(0.10),
+                      Colors.pink.withValues(alpha: 0.18),
+                      Colors.deepPurple.withValues(alpha: 0.10),
                     ]
                   : [
-                      Colors.pink.withOpacity(0.16),
-                      Colors.redAccent.withOpacity(0.08),
+                      Colors.pink.withValues(alpha: 0.16),
+                      Colors.redAccent.withValues(alpha: 0.08),
                     ],
         ),
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          color: Colors.pink.withOpacity(0.18),
+          color: Colors.pink.withValues(alpha: 0.18),
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.pink.withOpacity(0.08),
+            color: Colors.pink.withValues(alpha: 0.08),
             blurRadius: 18,
             offset: const Offset(0, 8),
           ),
@@ -408,7 +573,7 @@ class _LikesScreenState extends State<LikesScreen> {
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.80),
+                  color: Colors.white.withValues(alpha: 0.80),
                   shape: BoxShape.circle,
                 ),
                 child: const Center(
@@ -432,12 +597,14 @@ class _LikesScreenState extends State<LikesScreen> {
           Text(
             _heroDescription,
             style: TextStyle(
-              color: Colors.black.withOpacity(0.76),
+              color: Colors.black.withValues(alpha: 0.76),
               height: 1.35,
               fontWeight: FontWeight.w700,
               fontSize: 15,
             ),
           ),
+          const SizedBox(height: 12),
+          _buildNewLikesAndUpgradeRow(),
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
@@ -462,14 +629,74 @@ class _LikesScreenState extends State<LikesScreen> {
     );
   }
 
+  String get _newLikesText {
+    if (_newLikesCount <= 0) {
+      if (_t.isGerman) return 'Keine neuen Likes';
+      if (_t.isThai) return 'ไม่มีไลก์ใหม่';
+      return 'No new likes';
+    }
+    if (_t.isGerman) return '$_newLikesCount neue Likes';
+    if (_t.isThai) return '$_newLikesCount ไลก์ใหม่';
+    return '$_newLikesCount new likes';
+  }
+
+  String get _upgradeNowText {
+    if (_t.isGerman) return 'Upgrade now';
+    if (_t.isThai) return 'อัปเกรดเลย';
+    return 'Upgrade now';
+  }
+
+  Widget _buildNewLikesAndUpgradeRow() {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.78),
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: Colors.pink.withValues(alpha: 0.18)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.favorite_rounded, size: 16, color: Colors.pink),
+              const SizedBox(width: 6),
+              Text(
+                _newLikesText,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (!_isGold)
+          TextButton.icon(
+            onPressed: _openUpgrade,
+            icon: const Icon(Icons.auto_awesome_rounded, size: 16),
+            label: Text(_upgradeNowText),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _buildMiniPlanBadge(String text) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.82),
+        color: Colors.white.withValues(alpha: 0.82),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
-          color: Colors.black.withOpacity(0.08),
+          color: Colors.black.withValues(alpha: 0.08),
         ),
       ),
       child: Text(
@@ -477,7 +704,7 @@ class _LikesScreenState extends State<LikesScreen> {
         style: TextStyle(
           fontWeight: FontWeight.w900,
           fontSize: 11,
-          color: Colors.black.withOpacity(0.78),
+          color: Colors.black.withValues(alpha: 0.78),
           letterSpacing: 0.3,
         ),
       ),
@@ -523,9 +750,9 @@ class _LikesScreenState extends State<LikesScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.04),
+        color: Colors.black.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.black.withOpacity(0.06)),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -535,7 +762,7 @@ class _LikesScreenState extends State<LikesScreen> {
           Text(
             text,
             style: TextStyle(
-              color: Colors.black.withOpacity(0.76),
+              color: Colors.black.withValues(alpha: 0.76),
               fontWeight: FontWeight.w700,
               fontSize: 12,
             ),
@@ -553,7 +780,7 @@ class _LikesScreenState extends State<LikesScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.90),
+            color: Colors.white.withValues(alpha: 0.90),
             borderRadius: BorderRadius.circular(999),
           ),
           child: Text(
@@ -573,15 +800,15 @@ class _LikesScreenState extends State<LikesScreen> {
     return Positioned.fill(
       child: ClipRect(
         child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                              filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
           child: Container(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Colors.black.withOpacity(0.14),
-                  Colors.black.withOpacity(0.60),
+                  Colors.black.withValues(alpha: 0.14),
+                  Colors.black.withValues(alpha: 0.60),
                 ],
               ),
             ),
@@ -604,11 +831,11 @@ class _LikesScreenState extends State<LikesScreen> {
                       child: Container(
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.96),
+                          color: Colors.white.withValues(alpha: 0.96),
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.16),
+                              color: Colors.black.withValues(alpha: 0.16),
                               blurRadius: 16,
                               offset: const Offset(0, 4),
                             ),
@@ -628,7 +855,7 @@ class _LikesScreenState extends State<LikesScreen> {
                         vertical: 8,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.94),
+                        color: Colors.white.withValues(alpha: 0.94),
                         borderRadius: BorderRadius.circular(999),
                       ),
                       child: Text(
@@ -670,6 +897,8 @@ class _LikesScreenState extends State<LikesScreen> {
   Widget _buildLikeCard(Map<String, dynamic> p, int index) {
     final avatar = (p['avatar_url'] ?? '').toString().trim();
     final name = (p['display_name'] ?? 'User').toString().trim();
+    final likedTime = _relativeLikeTime(p['liked_at'] ?? p['created_at']);
+    final isNew = _isNewLike(p);
 
     final visible = _isVisibleAt(index);
     final visibleName = name.isEmpty
@@ -682,7 +911,26 @@ class _LikesScreenState extends State<LikesScreen> {
 
     return GestureDetector(
       onTap: () => _openLikedProfile(p, index),
-      child: ClipRRect(
+      child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    Colors.white.withValues(alpha: 0.06),
+                                    Colors.transparent,
+                                    Colors.pinkAccent.withValues(alpha: 0.04),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        ClipRRect(
         borderRadius: BorderRadius.circular(22),
         child: Stack(
           fit: StackFit.expand,
@@ -726,7 +974,7 @@ class _LikesScreenState extends State<LikesScreen> {
                     vertical: 5,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.90),
+                    color: Colors.white.withValues(alpha: 0.90),
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Row(
@@ -764,7 +1012,7 @@ class _LikesScreenState extends State<LikesScreen> {
                   vertical: 9,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.46),
+                  color: Colors.black.withValues(alpha: 0.46),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Row(
@@ -776,20 +1024,65 @@ class _LikesScreenState extends State<LikesScreen> {
                     ),
                     const SizedBox(width: 6),
                     Expanded(
-                      child: Text(
-                        visible
-                            ? visibleName
-                            : (_t.isGerman
-                                ? 'Jemand mag dich'
-                                : _t.isThai
-                                    ? 'มีคนชอบคุณ'
-                                    : 'Someone likes you'),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w800,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            visible
+                                ? visibleName
+                                : (_t.isGerman
+                                    ? 'Jemand mag dich'
+                                    : _t.isThai
+                                        ? 'มีคนชอบคุณ'
+                                        : 'Someone likes you'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  isNew
+                                      ? (_t.isGerman
+                                          ? 'Neu • $likedTime'
+                                          : _t.isThai
+                                              ? 'ใหม่ • $likedTime'
+                                              : 'New • $likedTime')
+                                      : likedTime,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.82),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                              if (!visible && !_isGold) ...[
+                                const SizedBox(width: 6),
+                                GestureDetector(
+                                  onTap: _openUpgrade,
+                                  child: Text(
+                                    _upgradeNowText,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w900,
+                                      decoration: TextDecoration.underline,
+                                      decorationColor: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -798,7 +1091,9 @@ class _LikesScreenState extends State<LikesScreen> {
             ),
           ],
         ),
-      ),
+        ),
+      ],
+    ),
     );
   }
 
@@ -810,82 +1105,6 @@ class _LikesScreenState extends State<LikesScreen> {
           Icons.person,
           size: 56,
           color: Colors.white,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBottomUpgradeBar() {
-    if (_isGold || _likes.isEmpty) return const SizedBox.shrink();
-
-    final text = _hiddenLikesCount > 0
-        ? (_t.isGerman
-            ? '$_hiddenLikesCount Likes sind noch gesperrt'
-            : _t.isThai
-                ? 'ยังมี $_hiddenLikesCount ไลก์ที่ถูกล็อกอยู่'
-                : '$_hiddenLikesCount likes are still locked')
-        : (_isPremium
-            ? (_t.isGerman
-                ? 'Mehr als 25 Likes mit Gold freischalten'
-                : _t.isThai
-                    ? 'ปลดล็อกมากกว่า 25 ไลก์ด้วย Gold'
-                    : 'Unlock more than 25 likes with Gold')
-            : (_t.isGerman
-                ? 'Mehr Likes mit Premium freischalten'
-                : _t.isThai
-                    ? 'ปลดล็อกไลก์เพิ่มด้วย Premium'
-                    : 'Unlock more likes with Premium'));
-
-    return SafeArea(
-      top: false,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border(
-            top: BorderSide(
-              color: Colors.black.withOpacity(0.06),
-            ),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, -2),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                text,
-                style: const TextStyle(
-                  fontWeight: FontWeight.w800,
-                  fontSize: 15,
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            ElevatedButton.icon(
-              onPressed: _openUpgrade,
-              icon: const Icon(Icons.auto_awesome_rounded),
-              label: Text(
-                _t.isGerman
-                    ? 'Freischalten'
-                    : _t.isThai
-                        ? 'ปลดล็อก'
-                        : 'Unlock',
-              ),
-              style: ElevatedButton.styleFrom(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
-                ),
-              ),
-            ),
-          ],
         ),
       ),
     );
@@ -924,7 +1143,7 @@ class _LikesScreenState extends State<LikesScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Icon(
-                  Icons.favorite_border_rounded,
+                  Icons.auto_awesome_rounded,
                   size: 54,
                   color: Colors.pink,
                 ),
@@ -950,7 +1169,7 @@ class _LikesScreenState extends State<LikesScreen> {
                           : 'As soon as someone likes you, it will appear here.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: Colors.black.withOpacity(0.64),
+                    color: Colors.black.withValues(alpha: 0.64),
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -1020,7 +1239,6 @@ class _LikesScreenState extends State<LikesScreen> {
         ],
       ),
       body: _buildContent(),
-      bottomNavigationBar: _buildBottomUpgradeBar(),
     );
   }
 }

@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -10,6 +10,7 @@ import 'auth_screen.dart';
 import 'blocked_users_screen.dart';
 import 'chat_list_screen.dart';
 import 'chat_screen.dart';
+import 'config.dart';
 import 'discovery_screen.dart';
 import 'firebase_options.dart';
 import 'home_screen.dart';
@@ -61,9 +62,13 @@ Future<void> main() async {
 
     try {
       if (Firebase.apps.isEmpty) {
-        await Firebase.initializeApp(
-          options: DefaultFirebaseOptions.currentPlatform,
-        );
+        if (kIsWeb) {
+          await Firebase.initializeApp(
+            options: DefaultFirebaseOptions.currentPlatform,
+          );
+        } else {
+          await Firebase.initializeApp();
+        }
         debugPrint('Firebase init erfolgreich');
       } else {
         debugPrint('Firebase bereits initialisiert');
@@ -73,7 +78,9 @@ Future<void> main() async {
       final errorText = e.toString();
       final isDuplicateDefaultApp =
           errorText.contains('[core/duplicate-app]') ||
-              errorText.contains('A Firebase App named "[DEFAULT]" already exists');
+              errorText.contains(
+                'A Firebase App named "[DEFAULT]" already exists',
+              );
 
       if (isDuplicateDefaultApp) {
         debugPrint('Firebase bereits initialisiert (duplicate-app erkannt)');
@@ -84,14 +91,11 @@ Future<void> main() async {
       }
     }
 
-    const supabaseUrl =
-        String.fromEnvironment('SUPABASE_URL', defaultValue: '');
-    const supabaseAnonKey =
-        String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
-    const revenueCatKey =
-        String.fromEnvironment('REVENUECAT_PUBLIC_KEY', defaultValue: '');
+    final supabaseUrl = Config.supabaseUrl.trim();
+    final supabaseAnonKey = Config.supabaseAnonKey.trim();
+    final revenueCatKey = Config.revenueCatPublicKey.trim();
 
-    final hasSupabaseConfig =
+    bool hasSupabaseConfig =
         supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;
 
     final anonPrefix = supabaseAnonKey.isEmpty
@@ -106,24 +110,38 @@ Future<void> main() async {
     debugPrint('SUPABASE_ANON_KEY_LENGTH=${supabaseAnonKey.length}');
 
     if (hasSupabaseConfig) {
-      await Supabase.initialize(
-        url: supabaseUrl,
-        anonKey: supabaseAnonKey,
-        debug: true,
-      );
-      debugPrint('Supabase init erfolgreich');
-      debugPrint(
-        'CURRENT SUPABASE USER AT STARTUP: ${Supabase.instance.client.auth.currentUser?.id}',
-      );
+      try {
+        await Supabase.initialize(
+          url: supabaseUrl,
+          anonKey: supabaseAnonKey,
+          debug: true,
+        );
+        debugPrint('Supabase init erfolgreich');
+        debugPrint(
+          'CURRENT SUPABASE USER AT STARTUP: ${Supabase.instance.client.auth.currentUser?.id}',
+        );
+      } catch (e, st) {
+        hasSupabaseConfig = false;
+        debugPrint('Supabase init fehlgeschlagen: $e');
+        debugPrint('$st');
+      }
     } else {
       debugPrint('Supabase Config fehlt');
     }
 
     try {
-      await SubscriptionService.instance.init(
-        publicKey: revenueCatKey,
-      );
-      debugPrint('SubscriptionService init erfolgreich');
+      final cleanRevenueCatKey = revenueCatKey.trim();
+
+      if (cleanRevenueCatKey.isEmpty) {
+        debugPrint('RevenueCat deaktiviert: kein Public Key gesetzt');
+      } else if (cleanRevenueCatKey.startsWith('test_')) {
+        debugPrint('RevenueCat deaktiviert: Test-Key im Release erkannt');
+      } else {
+        await SubscriptionService.instance.init(
+          publicKey: cleanRevenueCatKey,
+        );
+        debugPrint('SubscriptionService init erfolgreich');
+      }
     } catch (e, st) {
       debugPrint('SubscriptionService init fehlgeschlagen: $e');
       debugPrint('$st');
@@ -345,43 +363,16 @@ class _SupabaseSetupScreen extends StatelessWidget {
             : 'Setup required';
 
     final headline = t.isGerman
-        ? 'Supabase URL / ANON KEY fehlen.'
+        ? 'Supabase konnte nicht gestartet werden.'
         : t.isThai
-            ? 'ไม่มี Supabase URL / ANON KEY'
-            : 'Supabase URL / ANON KEY are missing.';
+            ? 'ไม่สามารถเริ่ม Supabase ได้'
+            : 'Supabase could not be started.';
 
     final description = t.isGerman
-        ? 'Starte die App mit --dart-define:\n\n'
-            'Android:\n'
-            'flutter run -d <deviceId> '
-            '--dart-define=SUPABASE_URL="https://xxx.supabase.co" '
-            '--dart-define=SUPABASE_ANON_KEY="xxx" '
-            '--dart-define=REVENUECAT_PUBLIC_KEY="rc_test_xxx"\n\n'
-            'Web:\n'
-            'flutter run -d chrome '
-            '--dart-define=SUPABASE_URL="https://xxx.supabase.co" '
-            '--dart-define=SUPABASE_ANON_KEY="xxx"'
+        ? 'Bitte App neu installieren oder den Entwickler kontaktieren.'
         : t.isThai
-            ? 'เริ่มแอปด้วย --dart-define:\n\n'
-                'Android:\n'
-                'flutter run -d <deviceId> '
-                '--dart-define=SUPABASE_URL="https://xxx.supabase.co" '
-                '--dart-define=SUPABASE_ANON_KEY="xxx" '
-                '--dart-define=REVENUECAT_PUBLIC_KEY="rc_test_xxx"\n\n'
-                'Web:\n'
-                'flutter run -d chrome '
-                '--dart-define=SUPABASE_URL="https://xxx.supabase.co" '
-                '--dart-define=SUPABASE_ANON_KEY="xxx"'
-            : 'Start the app with --dart-define:\n\n'
-                'Android:\n'
-                'flutter run -d <deviceId> '
-                '--dart-define=SUPABASE_URL="https://xxx.supabase.co" '
-                '--dart-define=SUPABASE_ANON_KEY="xxx" '
-                '--dart-define=REVENUECAT_PUBLIC_KEY="rc_test_xxx"\n\n'
-                'Web:\n'
-                'flutter run -d chrome '
-                '--dart-define=SUPABASE_URL="https://xxx.supabase.co" '
-                '--dart-define=SUPABASE_ANON_KEY="xxx"';
+            ? 'กรุณาติดตั้งแอปใหม่หรือติดต่อผู้พัฒนา'
+            : 'Please reinstall the app or contact the developer.';
 
     return Scaffold(
       appBar: AppBar(title: Text(title)),

@@ -82,7 +82,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
       bool isPremium = false;
       bool isGold = false;
 
-      if (data != null && data is Map<String, dynamic>) {
+      if (data != null && data != null) {
         isPremium = (data['is_premium'] ?? false) as bool;
         isGold = (data['is_gold'] ?? false) as bool;
       }
@@ -123,7 +123,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
           .eq('user_id', widget.profile.userId)
           .maybeSingle();
 
-      if (data != null && data is Map<String, dynamic>) {
+      if (data != null && data != null) {
         _aboutMe = (data['about_me'] ?? '') as String;
 
         final hobbies = data['hobbies'];
@@ -288,7 +288,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
                             (h) => Chip(
                               label: Text(h),
                               backgroundColor:
-                                  AppColors.primaryLight.withOpacity(0.3),
+                                  AppColors.primaryLight.withValues(alpha: 0.3),
                             ),
                           )
                           .toList(),

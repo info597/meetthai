@@ -31,32 +31,47 @@ class LikeQuotaCard extends StatelessWidget {
         ? 'Du kannst heute unbegrenzt liken.'
         : 'Bereits genutzt: ${quota.usedLikesToday}';
 
+    final ctaText = isPremium ? 'Gold holen' : 'Mehr Likes';
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: accent.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: accent.withOpacity(0.20)),
+        gradient: LinearGradient(
+          colors: [
+            accent.withValues(alpha: 0.16),
+            accent.withValues(alpha: 0.06),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: accent.withValues(alpha: 0.24)),
         boxShadow: [
           BoxShadow(
-            color: accent.withOpacity(0.08),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
+            color: accent.withValues(alpha: 0.16),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
       child: Row(
         children: [
-          Icon(
-            Icons.favorite_rounded,
-            color: isGold
-                ? Colors.amber.shade800
-                : isPremium
-                    ? Colors.pink.shade700
-                    : Colors.blueGrey.shade700,
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.16),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.favorite_rounded,
+              color: isGold
+                  ? Colors.amber.shade800
+                  : isPremium
+                      ? Colors.pink.shade700
+                      : Colors.blueGrey.shade700,
+            ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -65,14 +80,16 @@ class LikeQuotaCard extends StatelessWidget {
                   title,
                   style: const TextStyle(
                     fontWeight: FontWeight.w800,
+                    fontSize: 15,
                   ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 3),
                 Text(
                   subtitle,
                   style: TextStyle(
-                    color: Colors.black.withOpacity(0.68),
+                    color: Colors.black.withValues(alpha: 0.68),
                     fontWeight: FontWeight.w600,
+                    fontSize: 13,
                   ),
                 ),
               ],
@@ -81,7 +98,22 @@ class LikeQuotaCard extends StatelessWidget {
           if (!isGold && onUpgradeTap != null)
             TextButton(
               onPressed: onUpgradeTap,
-              child: Text(isPremium ? 'Gold' : 'Upgrade'),
+              style: TextButton.styleFrom(
+                foregroundColor: accent,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+              ),
+              child: Text(
+                ctaText,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
             ),
         ],
       ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'i18n/app_strings.dart';
@@ -48,8 +49,8 @@ class _AuthScreenState extends State<AuthScreen> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final email = _emailCtrl.text.trim();
-    final pass = _passCtrl.text;
+    final email = _emailCtrl.text.trim().toLowerCase();
+    final pass = _passCtrl.text.trim();
 
     setState(() => _loading = true);
 
@@ -71,8 +72,13 @@ class _AuthScreenState extends State<AuthScreen> {
       if (!mounted) return;
 
       final user = res.user ?? _supa.auth.currentUser;
+
       if (user == null) {
-        _snack(_t.errorLoginNoUser);
+        _snack(
+          _isLogin
+              ? 'Login fehlgeschlagen. Bitte Zugangsdaten prüfen.'
+              : 'Registrierung fehlgeschlagen. Bitte erneut versuchen.',
+        );
         return;
       }
 
@@ -86,6 +92,8 @@ class _AuthScreenState extends State<AuthScreen> {
 
       await SupabaseService.instance.ensureProfileExists();
 
+      TextInput.finishAutofillContext(shouldSave: true);
+
       if (!mounted) return;
 
       Navigator.of(context).pushNamedAndRemoveUntil(
@@ -97,9 +105,27 @@ class _AuthScreenState extends State<AuthScreen> {
 
       final msg = e.message.toLowerCase();
 
-      if (msg.contains('email not confirmed') ||
-          msg.contains('not confirmed')) {
+      if (msg.contains('invalid api key')) {
+        _snack(
+          'Auth Fehler: Invalid API key. Diese APK wurde mit falschem Supabase Key gebaut.',
+        );
+        return;
+      }
+
+      if (msg.contains('email not confirmed') || msg.contains('not confirmed')) {
         _snack(_t.emailNotConfirmed);
+        return;
+      }
+
+      if (msg.contains('invalid login credentials')) {
+        _snack('E-Mail oder Passwort ist falsch.');
+        return;
+      }
+
+      if (msg.contains('user already registered') ||
+          msg.contains('already registered') ||
+          msg.contains('already exists')) {
+        _snack('Diese E-Mail ist bereits registriert. Bitte Login verwenden.');
         return;
       }
 
@@ -184,96 +210,113 @@ class _AuthScreenState extends State<AuthScreen> {
                             borderRadius: BorderRadius.circular(20),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.06),
+                                color: Colors.black.withValues(alpha: 0.06),
                                 blurRadius: 18,
                                 offset: const Offset(0, 8),
                               ),
                             ],
                           ),
-                          child: Form(
-                            key: _formKey,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                TextFormField(
-                                  controller: _emailCtrl,
-                                  keyboardType: TextInputType.emailAddress,
-                                  autofillHints: const [AutofillHints.email],
-                                  decoration: InputDecoration(
-                                    labelText: _t.email,
-                                    prefixIcon: const Icon(Icons.mail_outline),
-                                    border: const OutlineInputBorder(),
+                          child: AutofillGroup(
+                            child: Form(
+                              key: _formKey,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  TextFormField(
+                                    controller: _emailCtrl,
+                                    keyboardType: TextInputType.emailAddress,
+                                    autofillHints: const [
+                                      AutofillHints.email,
+                                      AutofillHints.username,
+                                    ],
+                                    textInputAction: TextInputAction.next,
+                                    decoration: InputDecoration(
+                                      labelText: _t.email,
+                                      prefixIcon:
+                                          const Icon(Icons.mail_outline),
+                                      border: const OutlineInputBorder(),
+                                    ),
+                                    validator: (v) {
+                                      final s = (v ?? '').trim();
+                                      if (s.isEmpty) return _t.enterEmail;
+                                      if (!s.contains('@')) {
+                                        return _t.invalidEmail;
+                                      }
+                                      return null;
+                                    },
                                   ),
-                                  validator: (v) {
-                                    final s = (v ?? '').trim();
-                                    if (s.isEmpty) {
-                                      return _t.enterEmail;
-                                    }
-                                    if (!s.contains('@')) {
-                                      return _t.invalidEmail;
-                                    }
-                                    return null;
-                                  },
-                                ),
-                                const SizedBox(height: 14),
-                                TextFormField(
-                                  controller: _passCtrl,
-                                  obscureText: _obscure,
-                                  autofillHints: const [AutofillHints.password],
-                                  decoration: InputDecoration(
-                                    labelText: _t.password,
-                                    prefixIcon: const Icon(Icons.lock_outline),
-                                    border: const OutlineInputBorder(),
-                                    suffixIcon: IconButton(
-                                      onPressed: () {
-                                        setState(() => _obscure = !_obscure);
-                                      },
-                                      icon: Icon(
-                                        _obscure
-                                            ? Icons.visibility
-                                            : Icons.visibility_off,
+                                  const SizedBox(height: 14),
+                                  TextFormField(
+                                    controller: _passCtrl,
+                                    obscureText: _obscure,
+                                    autofillHints: _isLogin
+                                        ? const [AutofillHints.password]
+                                        : const [AutofillHints.newPassword],
+                                    textInputAction: TextInputAction.done,
+                                    onFieldSubmitted: (_) {
+                                      if (!_loading) _submit();
+                                    },
+                                    decoration: InputDecoration(
+                                      labelText: _t.password,
+                                      prefixIcon:
+                                          const Icon(Icons.lock_outline),
+                                      border: const OutlineInputBorder(),
+                                      suffixIcon: IconButton(
+                                        onPressed: () {
+                                          setState(
+                                            () => _obscure = !_obscure,
+                                          );
+                                        },
+                                        icon: Icon(
+                                          _obscure
+                                              ? Icons.visibility_off
+                                              : Icons.visibility,
+                                        ),
                                       ),
                                     ),
+                                    validator: (v) {
+                                      final s = (v ?? '').trim();
+                                      if (s.isEmpty) return _t.enterPassword;
+                                      if (s.length < 6) {
+                                        return _t.passwordTooShort;
+                                      }
+                                      return null;
+                                    },
                                   ),
-                                  validator: (v) {
-                                    final s = v ?? '';
-                                    if (s.isEmpty) {
-                                      return _t.enterPassword;
-                                    }
-                                    if (s.length < 6) {
-                                      return _t.passwordTooShort;
-                                    }
-                                    return null;
-                                  },
-                                ),
-                                const SizedBox(height: 18),
-                                SizedBox(
-                                  height: 48,
-                                  child: ElevatedButton(
-                                    onPressed: _loading ? null : _submit,
-                                    child: _loading
-                                        ? const SizedBox(
-                                            height: 20,
-                                            width: 20,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                            ),
-                                          )
-                                        : Text(title),
+                                  const SizedBox(height: 18),
+                                  SizedBox(
+                                    height: 48,
+                                    child: ElevatedButton(
+                                      onPressed: _loading ? null : _submit,
+                                      child: _loading
+                                          ? const SizedBox(
+                                              height: 20,
+                                              width: 20,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
+                                            )
+                                          : Text(title),
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(height: 10),
-                                TextButton(
-                                  onPressed: _loading
-                                      ? null
-                                      : () {
-                                          setState(() => _isLogin = !_isLogin);
-                                        },
-                                  child: Text(
-                                    _isLogin ? _t.noAccount : _t.haveAccount,
+                                  const SizedBox(height: 10),
+                                  TextButton(
+                                    onPressed: _loading
+                                        ? null
+                                        : () {
+                                            TextInput.finishAutofillContext(
+                                              shouldSave: false,
+                                            );
+                                            setState(
+                                              () => _isLogin = !_isLogin,
+                                            );
+                                          },
+                                    child: Text(
+                                      _isLogin ? _t.noAccount : _t.haveAccount,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                           ),
                         ),

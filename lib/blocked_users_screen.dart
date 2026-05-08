@@ -362,7 +362,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
         child: Text(
           text,
           style: TextStyle(
-            color: Colors.black.withOpacity(0.62),
+            color: Colors.black.withValues(alpha: 0.62),
             fontWeight: FontWeight.w600,
             fontSize: 13,
           ),
@@ -401,7 +401,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
                       : 'Try a different search term.',
               textAlign: TextAlign.center,
               style: TextStyle(
-                color: Colors.black.withOpacity(0.65),
+                color: Colors.black.withValues(alpha: 0.65),
                 fontWeight: FontWeight.w600,
               ),
             ),

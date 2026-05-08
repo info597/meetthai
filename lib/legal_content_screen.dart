@@ -167,9 +167,9 @@ class _LegalContentScreenState extends State<LegalContentScreen> {
           width: double.infinity,
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.black.withOpacity(0.08)),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -186,7 +186,7 @@ class _LegalContentScreenState extends State<LegalContentScreen> {
                 'Du kannst den Text direkt in app_settings speichern oder vorübergehend den externen Link nutzen.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: Colors.black.withOpacity(0.68),
+                  color: Colors.black.withValues(alpha: 0.68),
                   fontWeight: FontWeight.w600,
                   height: 1.35,
                 ),
@@ -238,10 +238,10 @@ class _LegalContentScreenState extends State<LegalContentScreen> {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.black.withOpacity(0.08)),
+              border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.04),
+                  color: Colors.black.withValues(alpha: 0.04),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 ),

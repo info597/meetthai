@@ -9,7 +9,9 @@ import 'discovery_screen.dart';
 import 'i18n/app_strings.dart';
 import 'likes_screen.dart';
 import 'matches_screen.dart';
+import 'profile_browser_screen.dart';
 import 'profile_preview_screen.dart';
+import 'services/chat_service.dart';
 import 'services/subscription_state.dart';
 import 'settings_screen.dart';
 import 'upgrade_screen.dart';
@@ -33,7 +35,12 @@ class _HomeScreenState extends State<HomeScreen> {
   String _planLabel = 'FREE';
 
   int _likesCount = 0;
+  int _likesBadgeCount = 0;
+  DateTime? _likesSeenAt;
   bool _loadingLikes = true;
+
+  int _chatUnreadCount = 0;
+  bool _loadingChatUnread = true;
 
   String _displayName = '';
   String? _avatarUrl;
@@ -42,6 +49,8 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Map<String, dynamic>> _previewProfiles = [];
 
   StreamSubscription<List<Map<String, dynamic>>>? _likesSub;
+  RealtimeChannel? _chatUnreadChannel;
+  Timer? _chatUnreadReloadDebounce;
 
   @override
   void initState() {
@@ -52,6 +61,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       unawaited(_refreshHomeData());
       _startLikesRealtime();
+      _startChatUnreadRealtime();
     });
   }
 
@@ -59,6 +69,8 @@ class _HomeScreenState extends State<HomeScreen> {
   void dispose() {
     _subscription.removeListener(_onSubscriptionChanged);
     _likesSub?.cancel();
+    _chatUnreadReloadDebounce?.cancel();
+    _unsubscribeChatUnreadRealtime();
     super.dispose();
   }
 
@@ -75,6 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
     await Future.wait([
       _subscription.refresh(),
       _loadLikesCount(),
+      _loadChatUnreadCount(),
       _loadProfilePreview(),
       _loadPreviewProfiles(),
     ]);
@@ -125,6 +138,65 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (_) {}
   }
 
+  Future<Set<String>> _loadBlockedUserIds() async {
+    final me = _supa.auth.currentUser;
+    if (me == null) return <String>{};
+
+    try {
+      final rows = await _supa
+          .from('user_blocks')
+          .select('blocker_user_id, blocked_user_id')
+          .or('blocker_user_id.eq.${me.id},blocked_user_id.eq.${me.id}');
+
+      final blocked = <String>{};
+
+      for (final row in (rows as List).cast<Map<String, dynamic>>()) {
+        final blocker = row['blocker_user_id']?.toString();
+        final blockedUser = row['blocked_user_id']?.toString();
+
+        if (blocker == me.id && blockedUser != null && blockedUser.isNotEmpty) {
+          blocked.add(blockedUser);
+        } else if (blockedUser == me.id &&
+            blocker != null &&
+            blocker.isNotEmpty) {
+          blocked.add(blocker);
+        }
+      }
+
+      return blocked;
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
+  Future<Set<String>> _loadDeletedUserIds() async {
+    try {
+      final rows = await _supa
+          .from('profiles')
+          .select('user_id')
+          .eq('is_deleted', true);
+
+      return (rows as List)
+          .map((e) => (e['user_id'] ?? '').toString())
+          .where((id) => id.isNotEmpty)
+          .toSet();
+    } catch (_) {
+      try {
+        final rows = await _supa
+            .from('profiles')
+            .select('user_id')
+            .not('deleted_at', 'is', null);
+
+        return (rows as List)
+            .map((e) => (e['user_id'] ?? '').toString())
+            .where((id) => id.isNotEmpty)
+            .toSet();
+      } catch (_) {
+        return <String>{};
+      }
+    }
+  }
+
   Future<void> _loadPreviewProfiles() async {
     final user = _supa.auth.currentUser;
     if (user == null) {
@@ -141,19 +213,39 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
+      final blockedUserIds = await _loadBlockedUserIds();
+      final deletedUserIds = await _loadDeletedUserIds();
+
       final rows = await _supa
           .from('profiles')
           .select(
-            'user_id, display_name, avatar_url, city, origin_country, is_online',
+            'user_id, display_name, avatar_url, city, origin_country, is_online, is_deleted, deleted_at',
           )
           .neq('user_id', user.id)
           .eq('is_hidden', false)
-          .limit(6);
+          .limit(30);
+
+      final filtered = (rows as List)
+          .cast<Map<String, dynamic>>()
+          .where((p) {
+            final userId = (p['user_id'] ?? '').toString();
+            final isDeleted = p['is_deleted'] == true;
+            final hasDeletedAt = p['deleted_at'] != null;
+
+            if (userId.isEmpty) return false;
+            if (blockedUserIds.contains(userId)) return false;
+            if (deletedUserIds.contains(userId)) return false;
+            if (isDeleted || hasDeletedAt) return false;
+
+            return true;
+          })
+          .take(6)
+          .toList();
 
       if (!mounted) return;
 
       setState(() {
-        _previewProfiles = (rows as List).cast<Map<String, dynamic>>().toList();
+        _previewProfiles = filtered;
         _loadingPreviewProfiles = false;
       });
     } catch (_) {
@@ -165,12 +257,23 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  DateTime? _parseDateTime(dynamic value) {
+    if (value == null) return null;
+
+    final text = value.toString().trim();
+    if (text.isEmpty) return null;
+
+    return DateTime.tryParse(text);
+  }
+
   Future<void> _loadLikesCount() async {
     final user = _supa.auth.currentUser;
     if (user == null) {
       if (!mounted) return;
       setState(() {
         _likesCount = 0;
+        _likesBadgeCount = 0;
+        _likesSeenAt = null;
         _loadingLikes = false;
       });
       return;
@@ -181,19 +284,90 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      final rows =
-          await _supa.from('likes').select('id').eq('to_user_id', user.id);
+      final profileRow = await _supa
+          .from('profiles')
+          .select('likes_seen_at')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+      final likesSeenAt = _parseDateTime(profileRow?['likes_seen_at']);
+
+      final rows = await _supa
+          .from('likes')
+          .select('id, created_at')
+          .eq('to_user_id', user.id);
+
+      final list = (rows as List).cast<Map<String, dynamic>>();
+      final total = list.length;
+
+      int unread = 0;
+
+      if (likesSeenAt == null) {
+        unread = total;
+      } else {
+        for (final row in list) {
+          final createdAt = _parseDateTime(row['created_at']);
+          if (createdAt == null) continue;
+
+          if (createdAt.toUtc().isAfter(likesSeenAt.toUtc())) {
+            unread++;
+          }
+        }
+      }
 
       if (!mounted) return;
       setState(() {
-        _likesCount = (rows as List).length;
+        _likesCount = total < 0 ? 0 : total;
+        _likesBadgeCount = unread < 0 ? 0 : unread;
+        _likesSeenAt = likesSeenAt;
         _loadingLikes = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _likesCount = 0;
+        _likesBadgeCount = 0;
+        _likesSeenAt = null;
         _loadingLikes = false;
+      });
+    }
+  }
+
+  Future<void> _loadChatUnreadCount() async {
+    final user = _supa.auth.currentUser;
+    if (user == null) {
+      if (!mounted) return;
+      setState(() {
+        _chatUnreadCount = 0;
+        _loadingChatUnread = false;
+      });
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _loadingChatUnread = true;
+      });
+    }
+
+    try {
+      final conversations = await ChatService.loadConversationList(limit: 120);
+
+      int unread = 0;
+      for (final c in conversations) {
+        unread += c.unreadCount;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _chatUnreadCount = unread < 0 ? 0 : unread;
+        _loadingChatUnread = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _chatUnreadCount = 0;
+        _loadingChatUnread = false;
       });
     }
   }
@@ -208,17 +382,86 @@ class _HomeScreenState extends State<HomeScreen> {
         .from('likes')
         .stream(primaryKey: ['id'])
         .eq('to_user_id', user.id)
-        .listen((rows) {
+        .listen((_) {
       if (!mounted) return;
-      setState(() {
-        _likesCount = rows.length;
-        _loadingLikes = false;
+      unawaited(_loadLikesCount());
+    });
+  }
+
+  void _startChatUnreadRealtime() {
+    _unsubscribeChatUnreadRealtime();
+
+    final user = _supa.auth.currentUser;
+    if (user == null) return;
+
+    _chatUnreadChannel = _supa.channel('home-chat-unread-${user.id}')
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'messages',
+        callback: (payload) {
+          final row = payload.newRecord.isNotEmpty
+              ? payload.newRecord
+              : payload.oldRecord;
+
+          final recipientId = row['recipient_id']?.toString();
+          final senderId = row['sender_id']?.toString();
+
+          if (recipientId != user.id && senderId != user.id) return;
+
+          _scheduleChatUnreadReload();
+        },
+      )
+      ..subscribe((status, [error]) {
+        debugPrint('[HomeScreen] chat unread realtime status=$status error=$error');
       });
+  }
+
+  void _unsubscribeChatUnreadRealtime() {
+    final channel = _chatUnreadChannel;
+    _chatUnreadChannel = null;
+
+    if (channel != null) {
+      unawaited(_supa.removeChannel(channel));
+    }
+  }
+
+  void _scheduleChatUnreadReload() {
+    if (!mounted) return;
+
+    _chatUnreadReloadDebounce?.cancel();
+    _chatUnreadReloadDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      unawaited(_loadChatUnreadCount());
     });
   }
 
   void _restartRealtimeIfNeeded() {
     _startLikesRealtime();
+    _startChatUnreadRealtime();
+  }
+
+  Future<void> _markLikesAsSeen() async {
+    final user = _supa.auth.currentUser;
+    if (user == null) return;
+
+    final seenAt = DateTime.now().toUtc();
+
+    if (mounted) {
+      setState(() {
+        _likesSeenAt = seenAt;
+        _likesBadgeCount = 0;
+        _loadingLikes = false;
+      });
+    }
+
+    try {
+      await _supa.from('profiles').upsert({
+        'user_id': user.id,
+        'likes_seen_at': seenAt.toIso8601String(),
+        'updated_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'user_id');
+    } catch (_) {}
   }
 
   Future<void> _openUpgrade() async {
@@ -258,6 +501,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _logout() async {
     await _likesSub?.cancel();
     _likesSub = null;
+    _chatUnreadReloadDebounce?.cancel();
+    _unsubscribeChatUnreadRealtime();
     await _supa.auth.signOut();
     if (!mounted) return;
     Navigator.pushNamedAndRemoveUntil(context, '/auth', (_) => false);
@@ -288,16 +533,103 @@ class _HomeScreenState extends State<HomeScreen> {
       case 1:
         return const DiscoveryScreen();
       case 2:
-        return const MatchesScreen();
+        return const ProfileBrowserScreen();
       case 3:
-        return const LikesScreen();
+        return const MatchesScreen();
       case 4:
-        return const ChatListScreen();
+        return const LikesScreen();
       case 5:
+        return const ChatListScreen();
+      case 6:
         return const ProfilePreviewScreen();
       default:
         return _buildDashboard();
     }
+  }
+
+  int _bottomNavSelectedIndex() {
+    switch (_index) {
+      case 0:
+        return 0; // Dashboard
+      case 1:
+        return 1; // Swipes
+      case 2:
+        return 2; // Mitglieder
+      case 4:
+        return 3; // Likes
+      case 5:
+        return 4; // Chat
+      case 6:
+        return 5; // Profil
+      default:
+        return 0;
+    }
+  }
+
+  Future<void> _onBottomNavSelected(int navIndex) async {
+    final int targetIndex;
+
+    switch (navIndex) {
+      case 0:
+        targetIndex = 0; // Dashboard
+        break;
+      case 1:
+        targetIndex = 1; // Swipes
+        break;
+      case 2:
+        targetIndex = 2; // Mitglieder
+        break;
+      case 3:
+        targetIndex = 4; // Likes
+        break;
+      case 4:
+        targetIndex = 5; // Chat
+        break;
+      case 5:
+        targetIndex = 6; // Profil
+        break;
+      default:
+        targetIndex = 0;
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      _index = targetIndex;
+    });
+
+    if (targetIndex == 4) {
+      unawaited(_markLikesAsSeen());
+    }
+
+    if (targetIndex == 5) {
+      await _loadChatUnreadCount();
+    }
+  }
+
+  Widget _badgeContainer({
+    required int count,
+    required double fontSize,
+    required EdgeInsets padding,
+    required BoxConstraints constraints,
+  }) {
+    return Container(
+      padding: padding,
+      decoration: BoxDecoration(
+        color: Colors.red,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      constraints: constraints,
+      child: Text(
+        count > 99 ? '99+' : '$count',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: fontSize,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
   }
 
   Widget _buildBottomLikesIcon() {
@@ -305,26 +637,35 @@ class _HomeScreenState extends State<HomeScreen> {
       clipBehavior: Clip.none,
       children: [
         const Icon(Icons.favorite_rounded),
-        if (!_loadingLikes && _likesCount > 0)
+        if (!_loadingLikes && _likesBadgeCount > 0)
           Positioned(
             right: -8,
             top: -6,
-            child: Container(
+            child: _badgeContainer(
+              count: _likesBadgeCount,
+              fontSize: 9,
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.red,
-                borderRadius: BorderRadius.circular(999),
-              ),
               constraints: const BoxConstraints(minWidth: 16),
-              child: Text(
-                _likesCount > 99 ? '99+' : '$_likesCount',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 9,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildBottomChatsIcon() {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        const Icon(Icons.chat_bubble_rounded),
+        if (!_loadingChatUnread && _chatUnreadCount > 0)
+          Positioned(
+            right: -8,
+            top: -6,
+            child: _badgeContainer(
+              count: _chatUnreadCount,
+              fontSize: 9,
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              constraints: const BoxConstraints(minWidth: 16),
             ),
           ),
       ],
@@ -583,14 +924,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  Colors.pink.withOpacity(0.18),
-                  Colors.orange.withOpacity(0.12),
-                  Colors.purple.withOpacity(0.08),
+                  Colors.pink.withValues(alpha: 0.18),
+                  Colors.orange.withValues(alpha: 0.12),
+                  Colors.purple.withValues(alpha: 0.08),
                 ],
               ),
               borderRadius: BorderRadius.circular(24),
               border: Border.all(
-                color: Colors.pink.withOpacity(0.14),
+                color: Colors.pink.withValues(alpha: 0.14),
               ),
             ),
             child: Column(
@@ -603,7 +944,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
+                        color: Colors.black.withValues(alpha: 0.05),
                         blurRadius: 10,
                         offset: const Offset(0, 4),
                       ),
@@ -628,7 +969,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 15,
-                    color: Colors.black.withOpacity(0.72),
+                    color: Colors.black.withValues(alpha: 0.72),
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -637,7 +978,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   heroSub,
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: Colors.black.withOpacity(0.62),
+                    color: Colors.black.withValues(alpha: 0.62),
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -659,9 +1000,9 @@ class _HomeScreenState extends State<HomeScreen> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.04),
+              color: Colors.black.withValues(alpha: 0.04),
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.black.withOpacity(0.08)),
+              border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -677,7 +1018,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Text(
                   _loadingLikes ? likesLoadingText : likesLoadedText,
                   style: TextStyle(
-                    color: Colors.black.withOpacity(0.7),
+                    color: Colors.black.withValues(alpha: 0.7),
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -687,9 +1028,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     Expanded(
                       child: ElevatedButton.icon(
                         onPressed: () {
-                          setState(() => _index = 3);
+                          setState(() => _index = 4);
+                          unawaited(_markLikesAsSeen());
                         },
-                        icon: const Icon(Icons.favorite_rounded),
+              icon: const Icon(Icons.favorite_rounded),
                         label: Text(likesOpenText),
                       ),
                     ),
@@ -703,18 +1045,18 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Expanded(
                 child: _QuickActionCard(
-                  icon: Icons.person_search_rounded,
+              icon: Icons.person_search_rounded,
                   title: profilePreviewText,
                   subtitle: profilePreviewSub,
                   onTap: () {
-                    setState(() => _index = 5);
+                    setState(() => _index = 6);
                   },
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: _QuickActionCard(
-                  icon: Icons.search_rounded,
+              icon: Icons.search_rounded,
                   title: t.search,
                   subtitle: newProfilesText,
                   onTap: () {
@@ -729,22 +1071,23 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               Expanded(
                 child: _QuickActionCard(
-                  icon: Icons.handshake_rounded,
+              icon: Icons.handshake_rounded,
                   title: t.matches,
                   subtitle: openMatchesText,
                   onTap: () {
-                    setState(() => _index = 2);
+                    setState(() => _index = 3);
                   },
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: _QuickActionCard(
-                  icon: Icons.chat_bubble_rounded,
+              icon: Icons.chat_bubble_rounded,
                   title: t.chats,
                   subtitle: readMessagesText,
-                  onTap: () {
-                    setState(() => _index = 4);
+                  onTap: () async {
+                    setState(() => _index = 5);
+                    await _loadChatUnreadCount();
                   },
                 ),
               ),
@@ -752,10 +1095,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 12),
           _QuickActionCard(
-            icon: isPremium
+              icon: isPremium
                 ? Icons.workspace_premium_rounded
                 : Icons.auto_awesome_rounded,
-            title: isGold ? goldActiveText : (isPremium ? toGoldText : upgradeText),
+            title:
+                isGold ? goldActiveText : (isPremium ? toGoldText : upgradeText),
             subtitle: upgradeSubtitle,
             onTap: isGold ? null : _openUpgrade,
           ),
@@ -765,10 +1109,10 @@ class _HomeScreenState extends State<HomeScreen> {
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.black.withOpacity(0.08)),
+              border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.03),
+                  color: Colors.black.withValues(alpha: 0.03),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 ),
@@ -788,7 +1132,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Text(
                   previewSub,
                   style: TextStyle(
-                    color: Colors.black.withOpacity(0.66),
+                    color: Colors.black.withValues(alpha: 0.66),
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -805,7 +1149,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.03),
+                      color: Colors.black.withValues(alpha: 0.03),
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Text(
@@ -824,7 +1168,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         final p = _previewProfiles[i];
                         final name =
                             (p['display_name'] ?? 'Profil').toString().trim();
-                        final avatar = (p['avatar_url'] ?? '').toString().trim();
+                        final avatar =
+                            (p['avatar_url'] ?? '').toString().trim();
                         final city = (p['city'] ?? '').toString().trim();
                         final origin =
                             (p['origin_country'] ?? '').toString().trim();
@@ -862,7 +1207,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     onPressed: () {
                       setState(() => _index = 1);
                     },
-                    icon: const Icon(Icons.explore_rounded),
+              icon: const Icon(Icons.explore_rounded),
                     label: Text(discoverNowText),
                   ),
                 ),
@@ -873,10 +1218,10 @@ class _HomeScreenState extends State<HomeScreen> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.pink.withOpacity(0.06),
+              color: Colors.pink.withValues(alpha: 0.06),
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
-                color: Colors.pink.withOpacity(0.12),
+                color: Colors.pink.withValues(alpha: 0.12),
               ),
             ),
             child: Column(
@@ -893,7 +1238,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   fasterStartSub,
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: Colors.black.withOpacity(0.68),
+                    color: Colors.black.withValues(alpha: 0.68),
                     height: 1.4,
                     fontWeight: FontWeight.w600,
                   ),
@@ -925,35 +1270,50 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               IconButton(
                 tooltip: t.likes,
-                onPressed: () async {
-                  setState(() => _index = 3);
-                  await _loadLikesCount();
+                onPressed: () {
+                  setState(() => _index = 4);
+                  unawaited(_markLikesAsSeen());
                 },
-                icon: const Icon(Icons.favorite_rounded),
+              icon: const Icon(Icons.favorite_rounded),
               ),
-              if (!_loadingLikes && _likesCount > 0)
+              if (!_loadingLikes && _likesBadgeCount > 0)
                 Positioned(
                   right: 6,
                   top: 6,
-                  child: Container(
+                  child: _badgeContainer(
+                    count: _likesBadgeCount,
+                    fontSize: 11,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 6,
                       vertical: 2,
                     ),
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      borderRadius: BorderRadius.circular(999),
+                    constraints: const BoxConstraints(minWidth: 18),
+                  ),
+                ),
+            ],
+          ),
+          Stack(
+            children: [
+              IconButton(
+                tooltip: t.chats,
+                onPressed: () async {
+                  setState(() => _index = 5);
+                  await _loadChatUnreadCount();
+                },
+              icon: const Icon(Icons.chat_bubble_rounded),
+              ),
+              if (!_loadingChatUnread && _chatUnreadCount > 0)
+                Positioned(
+                  right: 6,
+                  top: 6,
+                  child: _badgeContainer(
+                    count: _chatUnreadCount,
+                    fontSize: 11,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
                     ),
                     constraints: const BoxConstraints(minWidth: 18),
-                    child: Text(
-                      _likesCount > 99 ? '99+' : '$_likesCount',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
                   ),
                 ),
             ],
@@ -961,7 +1321,7 @@ class _HomeScreenState extends State<HomeScreen> {
           IconButton(
             tooltip: t.more,
             onPressed: _openMoreMenu,
-            icon: const Icon(Icons.more_vert_rounded),
+              icon: const Icon(Icons.more_vert_rounded),
           ),
           IconButton(
             tooltip: t.reloadStatus,
@@ -969,12 +1329,12 @@ class _HomeScreenState extends State<HomeScreen> {
               await _refreshHomeData();
               _restartRealtimeIfNeeded();
             },
-            icon: const Icon(Icons.refresh_rounded),
+              icon: const Icon(Icons.refresh_rounded),
           ),
           IconButton(
             tooltip: t.logout,
             onPressed: _logout,
-            icon: const Icon(Icons.logout_rounded),
+              icon: const Icon(Icons.logout_rounded),
           ),
         ],
         bottom: _index == 0
@@ -1001,7 +1361,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       if (!isGold)
                         ElevatedButton.icon(
                           onPressed: _openUpgrade,
-                          icon: Icon(
+              icon: Icon(
                             isPremium
                                 ? Icons.workspace_premium_rounded
                                 : Icons.auto_awesome_rounded,
@@ -1018,53 +1378,114 @@ class _HomeScreenState extends State<HomeScreen> {
       bottomNavigationBar: Theme(
         data: Theme.of(context).copyWith(
           navigationBarTheme: NavigationBarThemeData(
-            labelTextStyle: WidgetStateProperty.resolveWith<TextStyle?>(
-              (states) => const TextStyle(
+            backgroundColor: Colors.white,
+            indicatorColor: const Color(0xFFFF4D8D).withValues(alpha: 0.12),
+            labelTextStyle: WidgetStateProperty.resolveWith<TextStyle?>((states) {
+              final selected = states.contains(WidgetState.selected);
+              return TextStyle(
                 fontSize: 10,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                color: selected ? const Color(0xFFFF4D8D) : Colors.black87,
+              );
+            }),
+            iconTheme: WidgetStateProperty.resolveWith<IconThemeData?>((states) {
+              final selected = states.contains(WidgetState.selected);
+              return IconThemeData(
+                size: 25,
+                color: selected ? const Color(0xFFFF4D8D) : Colors.black87,
+              );
+            }),
           ),
         ),
-        child: NavigationBar(
-          selectedIndex: _index,
-          height: 68,
-          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-          onDestinationSelected: (i) async {
-            setState(() {
-              _index = i;
-            });
-
-            if (i == 3) {
-              await _loadLikesCount();
-            }
-          },
-          destinations: [
-            NavigationDestination(
-              icon: const Icon(Icons.home_rounded),
-              label: t.home,
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.search_rounded),
-              label: t.search,
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.handshake_rounded),
-              label: t.matches,
-            ),
-            NavigationDestination(
-              icon: _buildBottomLikesIcon(),
-              label: t.likes,
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.chat_bubble_rounded),
-              label: t.chats,
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.person_rounded),
-              label: t.profile,
-            ),
-          ],
+        child: SafeArea(
+          top: false,
+          child: NavigationBar(
+            selectedIndex: _bottomNavSelectedIndex(),
+            height: 72,
+            elevation: 10,
+            labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
+            onDestinationSelected: _onBottomNavSelected,
+            destinations: [
+              NavigationDestination(
+              icon: Tooltip(
+                  message: 'Dashboard',
+                  child: const Icon(Icons.local_fire_department_rounded),
+                ),
+                selectedIcon: Tooltip(
+                  message: 'Dashboard',
+                  child: const Icon(Icons.local_fire_department_rounded),
+                ),
+                label: 'Dashboard',
+              ),
+              NavigationDestination(
+              icon: Tooltip(
+                  message: 'Swipes',
+                  child: const Icon(Icons.style_rounded),
+                ),
+                selectedIcon: Tooltip(
+                  message: 'Swipes',
+                  child: const Icon(Icons.style_rounded),
+                ),
+                label: 'Swipes',
+              ),
+              NavigationDestination(
+              icon: Tooltip(
+                  message: t.isGerman
+                      ? 'Mitglieder'
+                      : t.isThai
+                          ? 'สมาชิก'
+                          : 'Members',
+                  child: const Icon(Icons.groups_rounded),
+                ),
+                selectedIcon: Tooltip(
+                  message: t.isGerman
+                      ? 'Mitglieder'
+                      : t.isThai
+                          ? 'สมาชิก'
+                          : 'Members',
+                  child: const Icon(Icons.groups_rounded),
+                ),
+                label: t.isGerman
+                    ? 'Mitglieder'
+                    : t.isThai
+                        ? 'สมาชิก'
+                        : 'Members',
+              ),
+              NavigationDestination(
+              icon: Tooltip(
+                  message: t.likes,
+                  child: _buildBottomLikesIcon(),
+                ),
+                selectedIcon: Tooltip(
+                  message: t.likes,
+                  child: _buildBottomLikesIcon(),
+                ),
+                label: t.likes,
+              ),
+              NavigationDestination(
+              icon: Tooltip(
+                  message: t.chats,
+                  child: _buildBottomChatsIcon(),
+                ),
+                selectedIcon: Tooltip(
+                  message: t.chats,
+                  child: _buildBottomChatsIcon(),
+                ),
+                label: t.chats,
+              ),
+              NavigationDestination(
+              icon: Tooltip(
+                  message: t.profile,
+                  child: const Icon(Icons.person_rounded),
+                ),
+                selectedIcon: Tooltip(
+                  message: t.profile,
+                  child: const Icon(Icons.person_rounded),
+                ),
+                label: t.profile,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1094,18 +1515,18 @@ class _PlanChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: chipColor.withOpacity(0.08),
+        color: chipColor.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: chipColor.withOpacity(0.20)),
+        border: Border.all(color: chipColor.withValues(alpha: 0.20)),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: chipColor.withOpacity(0.14),
+              color: chipColor.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: chipColor.withOpacity(0.25)),
+              border: Border.all(color: chipColor.withValues(alpha: 0.25)),
             ),
             child: Text(
               label,
@@ -1116,7 +1537,7 @@ class _PlanChip extends StatelessWidget {
                     ? Colors.amber.shade800
                     : isPremium
                         ? Colors.pink.shade700
-                        : Colors.black.withOpacity(0.75),
+                        : Colors.black.withValues(alpha: 0.75),
                 letterSpacing: 0.3,
               ),
             ),
@@ -1128,7 +1549,7 @@ class _PlanChip extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: Colors.black.withOpacity(0.72),
+                color: Colors.black.withValues(alpha: 0.72),
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -1164,9 +1585,9 @@ class _QuickActionCard extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.black.withOpacity(0.08)),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1186,7 +1607,7 @@ class _QuickActionCard extends StatelessWidget {
               Text(
                 subtitle,
                 style: TextStyle(
-                  color: Colors.black.withOpacity(0.68),
+                  color: Colors.black.withValues(alpha: 0.68),
                   fontWeight: FontWeight.w600,
                   height: 1.3,
                 ),
@@ -1225,9 +1646,9 @@ class _PreviewProfileCard extends StatelessWidget {
         width: 150,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.04),
+          color: Colors.black.withValues(alpha: 0.04),
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: Colors.black.withOpacity(0.08)),
+          border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1287,7 +1708,7 @@ class _PreviewProfileCard extends StatelessWidget {
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: Colors.black.withOpacity(0.64),
+                color: Colors.black.withValues(alpha: 0.64),
                 fontSize: 12.5,
                 fontWeight: FontWeight.w600,
                 height: 1.25,

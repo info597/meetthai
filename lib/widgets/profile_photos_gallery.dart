@@ -165,7 +165,7 @@ class _ProfilePhotosGalleryState extends State<ProfilePhotosGallery> {
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.04),
+            color: Colors.black.withValues(alpha: 0.04),
             borderRadius: BorderRadius.circular(14),
           ),
           child: Row(
@@ -219,7 +219,7 @@ class _Thumb extends StatelessWidget {
             ),
             if (!unlocked) ...[
               Positioned.fill(
-                child: Container(color: Colors.black.withOpacity(0.20)),
+                child: Container(color: Colors.black.withValues(alpha: 0.20)),
               ),
               const Positioned(
                 right: 6,
