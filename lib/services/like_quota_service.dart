@@ -75,7 +75,7 @@ class LikeQuotaService {
     planCode: 'free',
     dailyLikeLimit: 10,
     usedLikesToday: 0,
-    remainingLikesToday: 20,
+    remainingLikesToday: 10,
     unlimited: false,
   );
 
@@ -131,4 +131,68 @@ class LikeQuotaService {
       return _fallbackQuota;
     }
   }
+
+
+  static Future<void> applyDailyLoginBonus() async {
+    final user = _supa.auth.currentUser;
+
+    if (user == null) return;
+
+    try {
+      final profile = await _supa
+          .from('profiles')
+          .select('plan_code, daily_like_bonus, last_daily_bonus_at')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+      final now = DateTime.now();
+
+      final lastBonus = profile?['last_daily_bonus_at'] != null
+          ? DateTime.tryParse(
+              profile!['last_daily_bonus_at'].toString(),
+            )
+          : null;
+
+      final alreadyClaimedToday =
+          lastBonus != null &&
+          lastBonus.year == now.year &&
+          lastBonus.month == now.month &&
+          lastBonus.day == now.day;
+
+      if (alreadyClaimedToday) return;
+
+      final planCode =
+          (profile?['plan_code'] ?? 'free')
+              .toString()
+              .trim()
+              .toLowerCase();
+
+      final isPremium =
+          planCode == 'premium' ||
+          planCode == 'gold' ||
+          planCode == 'plus';
+
+      final bonusLikes = isPremium ? 10 : 5;
+
+      final currentBonus =
+          (profile?['daily_like_bonus'] ?? 0) as int;
+
+      await _supa
+          .from('profiles')
+          .update({
+            'daily_like_bonus': currentBonus + bonusLikes,
+            'last_daily_bonus_at': now.toIso8601String(),
+          })
+          .eq('user_id', user.id);
+
+      debugPrint(
+        '[LikeQuotaService] daily login bonus applied: +$bonusLikes',
+      );
+    } catch (e) {
+      debugPrint(
+        '[LikeQuotaService] applyDailyLoginBonus error: $e',
+      );
+    }
+  }
+
 }

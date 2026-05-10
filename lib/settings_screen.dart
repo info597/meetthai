@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -614,7 +615,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ],
           ),
-        ],
+        
+          const SizedBox(height: 24),
+
+          ListTile(
+            leading: const Icon(Icons.bug_report, color: Colors.red),
+            title: const Text('Crashlytics Test-Crash'),
+            subtitle: const Text('Nur für internen Firebase-Test'),
+            onTap: () {
+              FirebaseCrashlytics.instance.crash();
+            },
+          ),
+],
       ),
     );
   }

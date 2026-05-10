@@ -148,4 +148,19 @@ class ProfileService {
       // Ignorieren – ist nur ein Komfort-Feature
     }
   }
+
+
+  static Future<void> updateLastSeen() async {
+    final user = Supabase.instance.client.auth.currentUser;
+
+    if (user == null) return;
+
+    await Supabase.instance.client
+        .from('profiles')
+        .update({
+          'last_seen_at': DateTime.now().toIso8601String(),
+        })
+        .eq('user_id', user.id);
+  }
+
 }

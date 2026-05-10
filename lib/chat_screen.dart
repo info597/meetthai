@@ -1531,8 +1531,7 @@ class _ChatScreenState extends State<ChatScreen> {
             SizedBox(width: 6),
             Text(
               'Wird gesendet...',
-              style: TextStyle(fontSize: 11,
-                                  letterSpacing: 0.2, color: Colors.black54),
+              style: TextStyle(fontSize: 11, color: Colors.black54),
             ),
           ],
         );
@@ -1550,7 +1549,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 'Fehlgeschlagen • Tippen zum Wiederholen',
                 style: TextStyle(
                   fontSize: 11,
-                                  letterSpacing: 0.2,
                   color: Colors.red,
                   fontWeight: FontWeight.w600,
                 ),
@@ -1568,7 +1566,6 @@ class _ChatScreenState extends State<ChatScreen> {
           _formatTime(m.createdAt),
           style: const TextStyle(
             fontSize: 11,
-                                  letterSpacing: 0.2,
             color: Colors.black54,
           ),
         ),
@@ -1584,7 +1581,6 @@ class _ChatScreenState extends State<ChatScreen> {
             m.isRead ? 'Gelesen' : 'Gesendet',
             style: TextStyle(
               fontSize: 11,
-                                  letterSpacing: 0.2,
               color: m.isRead ? Colors.blue : Colors.black54,
               fontWeight: FontWeight.w500,
             ),
@@ -1644,9 +1640,9 @@ class _ChatScreenState extends State<ChatScreen> {
           width: double.infinity,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.04),
+            color: Colors.black.withOpacity(0.04),
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+            border: Border.all(color: Colors.black.withOpacity(0.08)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1669,7 +1665,7 @@ class _ChatScreenState extends State<ChatScreen> {
               Text(
                 'Du kannst keine Nachrichten mehr senden oder empfangen.',
                 style: TextStyle(
-                  color: Colors.black.withValues(alpha: 0.68),
+                  color: Colors.black.withOpacity(0.68),
                   fontWeight: FontWeight.w600,
                 ),
                 textAlign: TextAlign.center,
@@ -1699,7 +1695,7 @@ class _ChatScreenState extends State<ChatScreen> {
             'Keine älteren Nachrichten mehr.',
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: Colors.black.withValues(alpha: 0.45),
+              color: Colors.black.withOpacity(0.45),
               fontSize: 12,
               fontWeight: FontWeight.w600,
             ),
@@ -1721,6 +1717,138 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
   }
+
+
+  List<String> _localizedIcebreakers(BuildContext context) {
+    final languageCode = Localizations.localeOf(context).languageCode;
+
+    switch (languageCode) {
+      case 'th':
+        return const [
+          'วันนี้มีอะไรทำให้คุณยิ้มไหม?',
+          'คุณชอบเที่ยวทะเล เมือง หรือภูเขามากกว่ากัน?',
+          'อาหารไทยจานโปรดของคุณคืออะไร?',
+          'ถ้ามีพรุ่งนี้ว่างทั้งวัน คุณอยากทำอะไร?',
+          'เดทแรกในฝันของคุณเป็นแบบไหน?',
+          'ช่วงนี้คุณฟังเพลงอะไรบ่อยที่สุด?',
+          'คุณเป็นคนชอบกาแฟหรือชา?',
+          'ประเทศไหนที่คุณอยากไปเที่ยวมากที่สุด?',
+          'อะไรเล็ก ๆ ที่ทำให้คุณมีความสุข?',
+          'วันหยุดที่สมบูรณ์แบบของคุณเป็นแบบไหน?',
+          'คุณชอบดูหนังแนวไหน?',
+          'ถ้าเลือกได้ คุณอยากอยู่ทะเลหรือภูเขา?',
+          'คุณชอบทำอาหารไหม?',
+          'สิ่งแรกที่คุณสังเกตในตัวคนอื่นคืออะไร?',
+          'คุณเชื่อในรักแรกพบไหม?',
+          'คุณชอบคุยเรื่องตลกหรือเรื่องลึกซึ้งมากกว่ากัน?',
+        ];
+      case 'en':
+        return const [
+          'What made you smile today?',
+          'Beach, city, or mountains?',
+          'What is your favorite Thai food?',
+          'If you had tomorrow free, what would you do?',
+          'What would your perfect first date look like?',
+          'What song are you listening to a lot right now?',
+          'Are you more of a coffee or tea person?',
+          'Which country would you love to visit next?',
+          'What small thing makes you happy?',
+          'What does a perfect weekend look like for you?',
+          'What kind of movies do you like?',
+          'Would you rather live near the sea or in the mountains?',
+          'Do you like cooking?',
+          'What is the first thing you notice about someone?',
+          'Do you believe in love at first sight?',
+          'Do you prefer funny conversations or deep conversations?',
+        ];
+      default:
+        return const [
+          'Was hat dich heute zum Lächeln gebracht?',
+          'Strand, Stadt oder Berge?',
+          'Was ist dein liebstes Thai-Essen?',
+          'Wenn du morgen frei hättest, was würdest du machen?',
+          'Wie sieht dein perfektes erstes Date aus?',
+          'Welchen Song hörst du gerade am liebsten?',
+          'Bist du eher Kaffee- oder Tee-Mensch?',
+          'Welches Land möchtest du als Nächstes besuchen?',
+          'Welche Kleinigkeit macht dich glücklich?',
+          'Wie sieht dein perfektes Wochenende aus?',
+          'Welche Filme schaust du gerne?',
+          'Würdest du lieber am Meer oder in den Bergen leben?',
+          'Kochst du gerne?',
+          'Was bemerkst du als Erstes an einem Menschen?',
+          'Glaubst du an Liebe auf den ersten Blick?',
+          'Magst du lieber lustige oder tiefgründige Gespräche?',
+        ];
+    }
+  }
+
+  void _insertIcebreaker(String message) {
+    final currentText = _controller.text.trim();
+
+    final nextText = currentText.isEmpty
+        ? message
+        : '$currentText\n$message';
+
+    _controller.text = nextText;
+    _controller.selection = TextSelection.collapsed(
+      offset: _controller.text.length,
+    );
+  }
+
+  Widget _buildIcebreakerDropdown(bool disabled) {
+    final icebreakers = _localizedIcebreakers(context);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: Colors.pink.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.pink.shade100,
+        ),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          isExpanded: true,
+          value: null,
+          icon: const Icon(Icons.expand_more),
+          hint: const Row(
+            children: [
+              Icon(Icons.auto_awesome, size: 18, color: Colors.pink),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Icebreaker auswählen',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          items: icebreakers
+              .map(
+                (text) => DropdownMenuItem<String>(
+                  value: text,
+                  child: Text(
+                    text,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              )
+              .toList(),
+          onChanged: disabled
+              ? null
+              : (value) {
+                  if (value == null) return;
+                  _insertIcebreaker(value);
+                },
+        ),
+      ),
+    );
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -1796,7 +1924,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             ? Colors.redAccent
                             : _otherIsTyping
                                 ? Colors.greenAccent
-                                : Colors.white.withValues(alpha: 0.85),
+                                : Colors.white.withOpacity(0.85),
                         fontWeight: FontWeight.w500,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -1856,7 +1984,7 @@ class _ChatScreenState extends State<ChatScreen> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              color: Colors.amber.withValues(alpha: 0.28),
+              color: Colors.amber.withOpacity(0.2),
               child: Text(
                 _debugStatus!,
                 style: const TextStyle(fontSize: 12),
@@ -1867,11 +1995,11 @@ class _ChatScreenState extends State<ChatScreen> {
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
               child: Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.04),
+                  color: Colors.black.withOpacity(0.04),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
+                  border: Border.all(color: Colors.black.withOpacity(0.08)),
                 ),
                 child: Row(
                   children: [
@@ -1881,7 +2009,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       child: Text(
                         'Du kannst in ${_formatWait(_cooldownSeconds)} wieder senden.',
                         style: TextStyle(
-                          color: Colors.black.withValues(alpha: 0.75),
+                          color: Colors.black.withOpacity(0.75),
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -1905,7 +2033,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     ? const Center(child: CircularProgressIndicator())
                     : ListView.builder(
                         controller: _scrollController,
-                        padding: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(12),
                         reverse: false,
                         itemCount: _messages.length + 1,
                         itemBuilder: (context, i) {
@@ -1932,7 +2060,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 250),
                               margin: const EdgeInsets.symmetric(vertical: 4),
-                              padding: const EdgeInsets.all(16),
+                              padding: const EdgeInsets.all(12),
                               constraints: const BoxConstraints(maxWidth: 280),
                               decoration: BoxDecoration(
                                 color: isHighlighted
@@ -1940,10 +2068,10 @@ class _ChatScreenState extends State<ChatScreen> {
                                     : (isMe
                                         ? Colors.pink.shade100
                                         : Colors.grey.shade300),
-                                borderRadius: BorderRadius.circular(32),
+                                borderRadius: BorderRadius.circular(16),
                                 border: m.isFailed
                                     ? Border.all(
-                                        color: Colors.red.withValues(alpha: 0.4),
+                                        color: Colors.red.withOpacity(0.4),
                                       )
                                     : (isHighlighted
                                         ? Border.all(
@@ -1971,42 +2099,48 @@ class _ChatScreenState extends State<ChatScreen> {
             SafeArea(
               child: Padding(
                 padding: const EdgeInsets.all(8),
-                child: Row(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (canShowImageButton)
-                      IconButton(
-                        tooltip: 'Bild senden',
-                        onPressed: sendDisabled ? null : _pickAndSendImage,
-                        icon: const Icon(Icons.image_outlined),
-                      ),
-                    if (canShowShortButton)
-                      IconButton(
-                        tooltip: 'Short senden',
-                        onPressed: sendDisabled ? null : _pickAndSendShort,
-                        icon: const Icon(Icons.videocam_outlined),
-                      ),
-                    Expanded(
-                      child: TextField(
-                        controller: _controller,
-                        enabled: !sendDisabled,
-                        maxLines: 3,
-                        minLines: 1,
-                        textInputAction: TextInputAction.send,
-                        decoration: InputDecoration(
-                          hintText: sendDisabled
-                              ? (_cooldownSeconds > 0
-                                  ? 'Warte ${_formatWait(_cooldownSeconds)}…'
-                                  : 'Bitte warten…')
-                              : 'Nachricht schreiben...',
-                          border: const OutlineInputBorder(),
+                    _buildIcebreakerDropdown(sendDisabled),
+                    Row(
+                      children: [
+                        if (canShowImageButton)
+                          IconButton(
+                            tooltip: 'Bild senden',
+                            onPressed: sendDisabled ? null : _pickAndSendImage,
+                            icon: const Icon(Icons.image_outlined),
+                          ),
+                        if (canShowShortButton)
+                          IconButton(
+                            tooltip: 'Short senden',
+                            onPressed: sendDisabled ? null : _pickAndSendShort,
+                            icon: const Icon(Icons.videocam_outlined),
+                          ),
+                        Expanded(
+                          child: TextField(
+                            controller: _controller,
+                            enabled: !sendDisabled,
+                            maxLines: 3,
+                            minLines: 1,
+                            textInputAction: TextInputAction.send,
+                            decoration: InputDecoration(
+                              hintText: sendDisabled
+                                  ? (_cooldownSeconds > 0
+                                      ? 'Warte ${_formatWait(_cooldownSeconds)}…'
+                                      : 'Bitte warten…')
+                                  : 'Nachricht schreiben...',
+                              border: const OutlineInputBorder(),
+                            ),
+                            onSubmitted: (_) => sendDisabled ? null : _send(),
+                          ),
                         ),
-                        onSubmitted: (_) => sendDisabled ? null : _send(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      icon: const Icon(Icons.send_rounded),
-                      onPressed: sendDisabled ? null : _send,
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.send),
+                          onPressed: sendDisabled ? null : _send,
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -2184,7 +2318,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
                     width: 52,
                     height: 52,
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.45),
+                      color: Colors.black.withOpacity(0.45),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(
@@ -2210,7 +2344,7 @@ class _FullScreenImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black.withValues(alpha: 0.72),
+      backgroundColor: Colors.black,
       appBar: AppBar(backgroundColor: Colors.black),
       body: Center(
         child: InteractiveViewer(
@@ -2356,7 +2490,6 @@ class _Msg {
       isSending: isSending ?? this.isSending,
       isFailed: isFailed ?? this.isFailed,
       localError: localError ?? this.localError,
-    
     );
   }
 

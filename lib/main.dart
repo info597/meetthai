@@ -15,6 +15,8 @@ import 'chat_screen.dart';
 import 'config.dart';
 import 'discovery_screen.dart';
 import 'firebase_options.dart';
+import 'services/profile_service.dart';
+import 'services/like_quota_service.dart';
 import 'home_screen.dart';
 import 'i18n/app_locale_controller.dart';
 import 'i18n/app_locale_scope.dart';
@@ -130,6 +132,9 @@ Future<void> main() async {
           debug: true,
         );
         debugPrint('Supabase init erfolgreich');
+
+    await ProfileService.updateLastSeen();
+    await LikeQuotaService.applyDailyLoginBonus();
         debugPrint(
           'CURRENT SUPABASE USER AT STARTUP: ${Supabase.instance.client.auth.currentUser?.id}',
         );

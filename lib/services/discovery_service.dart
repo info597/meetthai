@@ -48,6 +48,7 @@ class DiscoveryProfile {
     required this.hobbies,
     required this.languages,
     required this.gender,
+      last_seen_at,
     required this.birthdate,
     required this.heightCm,
     required this.weightKg,
