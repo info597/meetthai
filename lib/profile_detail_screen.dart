@@ -82,7 +82,7 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
       bool isPremium = false;
       bool isGold = false;
 
-      if (data != null) {
+      if (data != null && data != null) {
         isPremium = (data['is_premium'] ?? false) as bool;
         isGold = (data['is_gold'] ?? false) as bool;
       }
@@ -120,10 +120,10 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
       final data = await _supa
           .from('profiles')
           .select('about_me, hobbies')
-          .eq('user_id', widget.profile.userId.toString())
+          .eq('user_id', widget.profile.userId)
           .maybeSingle();
 
-      if (data != null) {
+      if (data != null && data != null) {
         _aboutMe = (data['about_me'] ?? '') as String;
 
         final hobbies = data['hobbies'];
@@ -151,17 +151,12 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     final locationText = _buildLocationText(profile);
     final jobText =
         (profile.job == null || profile.job!.isEmpty) ? null : profile.job;
-    final displayName =
-        profile.displayName.isEmpty ? 'Unbekannt' : profile.displayName;
 
     return Scaffold(
-      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: Text(displayName),
-        centerTitle: true,
-        elevation: 0,
-        backgroundColor: Colors.black.withOpacity(0.08),
-        foregroundColor: Colors.white,
+        title: Text(
+          profile.displayName.isEmpty ? 'Profil' : profile.displayName,
+        ),
       ),
       body: Container(
         decoration: const BoxDecoration(
@@ -175,90 +170,136 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
           ),
         ),
         child: SafeArea(
-          top: false,
           child: Stack(
             children: [
               ListView(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                 children: [
-                  const SizedBox(height: 12),
+                  // Fotos
                   _buildPhotoCarousel(context, visiblePhotos, hasMoreHidden),
-                  const SizedBox(height: 18),
-                  _buildHeroInfoCard(
-                    context: context,
-                    profile: profile,
-                    displayName: displayName,
-                    locationText: locationText,
-                    jobText: jobText,
-                  ),
+
                   const SizedBox(height: 16),
-                  _buildSectionCard(
-                    context: context,
-                    icon: Icons.person_rounded,
-                    title: 'Über mich',
-                    child: Text(
-                      (_aboutMe == null || _aboutMe!.trim().isEmpty)
-                          ? 'Noch keine Beschreibung vorhanden.'
-                          : _aboutMe!,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            height: 1.45,
-                            color: Colors.black87,
+
+                  // Name + Online-Status + Abo-Badge
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          profile.displayName.isEmpty
+                              ? 'Unbekannt'
+                              : profile.displayName,
+                          style: Theme.of(context)
+                              .textTheme
+                              .headlineSmall
+                              ?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      _buildOnlineChip(profile),
+                    ],
+                  ),
+
+                  const SizedBox(height: 8),
+                  _buildSubscriptionChip(profile),
+
+                  if (locationText != null) ...[
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.location_on_rounded,
+                          size: 18,
+                          color: Colors.black54,
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            locationText,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(color: Colors.black87),
                           ),
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  _buildSectionCard(
-                    context: context,
-                    icon: Icons.interests_rounded,
-                    title: 'Hobbies',
-                    child: _hobbies.isEmpty
-                        ? Text(
-                            'Noch keine Hobbies angegeben.',
-                            style:
-                                Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                      color: Colors.black54,
-                                    ),
-                          )
-                        : Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: _hobbies
-                                .map(
-                                  (h) => Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      gradient: LinearGradient(
-                                        colors: [
-                                          AppColors.primary.withOpacity(0.14),
-                                          AppColors.primaryLight
-                                              .withOpacity(0.28),
-                                        ],
-                                      ),
-                                      borderRadius: BorderRadius.circular(999),
-                                      border: Border.all(
-                                        color:
-                                            AppColors.primary.withOpacity(0.18),
-                                      ),
-                                    ),
-                                    child: Text(
-                                      h,
-                                      style: const TextStyle(
-                                        color: Colors.black87,
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                  ),
-                                )
-                                .toList(),
+                  ],
+
+                  if (jobText != null) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.work_outline_rounded,
+                          size: 18,
+                          color: Colors.black54,
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            jobText,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodyMedium
+                                ?.copyWith(color: Colors.black87),
                           ),
+                        ),
+                      ],
+                    ),
+                  ],
+
+                  const SizedBox(height: 24),
+
+                  // Über mich
+                  Text(
+                    'Über mich',
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
-                  const SizedBox(height: 82),
+                  const SizedBox(height: 8),
+                  Text(
+                    (_aboutMe == null || _aboutMe!.trim().isEmpty)
+                        ? 'Noch keine Beschreibung vorhanden.'
+                        : _aboutMe!,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // Hobbies
+                  Text(
+                    'Hobbies',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  if (_hobbies.isEmpty)
+                    Text(
+                      'Noch keine Hobbies angegeben.',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    )
+                  else
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      children: _hobbies
+                          .map(
+                            (h) => Chip(
+                              label: Text(h),
+                              backgroundColor:
+                                  AppColors.primaryLight.withValues(alpha: 0.3),
+                            ),
+                          )
+                          .toList(),
+                    ),
+
+                  const SizedBox(height: 32),
+                  // Hier könnten später noch Buttons hin:
+                  // "Like", "Chat starten" etc., wenn du möchtest.
                 ],
               ),
+
               if (_isLoading)
                 const Positioned(
                   top: 0,
@@ -295,391 +336,130 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     bool hasMoreHidden,
   ) {
     if (visiblePhotos.isEmpty) {
+      // Fallback – sollte eigentlich nie passieren
       return Container(
-        height: 420,
+        height: 280,
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(34),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              AppColors.primary.withOpacity(0.32),
-              Colors.black.withOpacity(0.82),
-            ],
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.18),
-              blurRadius: 28,
-              offset: const Offset(0, 14),
-            ),
-          ],
+          borderRadius: BorderRadius.circular(24),
+          color: Colors.grey.shade300,
         ),
         child: const Center(
           child: Icon(
             Icons.person_rounded,
-            size: 82,
+            size: 64,
             color: Colors.white70,
           ),
         ),
       );
     }
 
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(34),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.22),
-            blurRadius: 34,
-            offset: const Offset(0, 18),
-          ),
-        ],
-      ),
-      child: AspectRatio(
-        aspectRatio: 3 / 4,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(34),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              PageView.builder(
-                itemCount: visiblePhotos.length,
-                onPageChanged: (index) {
-                  setState(() {
-                    _currentPhotoIndex = index;
-                  });
-                },
-                itemBuilder: (context, index) {
-                  final url = visiblePhotos[index];
+    return Column(
+      children: [
+        AspectRatio(
+          aspectRatio: 3 / 4,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(24),
+            child: Stack(
+              children: [
+                PageView.builder(
+                  itemCount: visiblePhotos.length,
+                  onPageChanged: (index) {
+                    setState(() {
+                      _currentPhotoIndex = index;
+                    });
+                  },
+                  itemBuilder: (context, index) {
+                    final url = visiblePhotos[index];
 
-                  final isNetwork =
-                      url.startsWith('http://') || url.startsWith('https://');
+                    final isNetwork =
+                        url.startsWith('http://') || url.startsWith('https://');
 
-                  return Container(
-                    color: Colors.black,
-                    child: isNetwork
-                        ? Image.network(
-                            url,
-                            fit: BoxFit.cover,
-                            loadingBuilder: (context, child, progress) {
-                              if (progress == null) return child;
-                              return const Center(
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              );
-                            },
-                            errorBuilder: (context, error, stack) {
-                              return const Center(
-                                child: Icon(
-                                  Icons.broken_image_outlined,
-                                  size: 52,
-                                  color: Colors.white70,
-                                ),
-                              );
-                            },
-                          )
-                        : Image.asset(
-                            url,
-                            fit: BoxFit.cover,
-                          ),
-                  );
-                },
-              ),
-              const DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.center,
-                    colors: [
-                      Colors.black45,
-                      Colors.transparent,
-                    ],
-                  ),
+                    return Container(
+                      color: Colors.black,
+                      child: isNetwork
+                          ? Image.network(
+                              url,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stack) {
+                                return const Center(
+                                  child: Icon(
+                                    Icons.broken_image_outlined,
+                                    size: 48,
+                                    color: Colors.white70,
+                                  ),
+                                );
+                              },
+                            )
+                          : Image.asset(
+                              url,
+                              fit: BoxFit.cover,
+                            ),
+                    );
+                  },
                 ),
-              ),
-              const DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.center,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.transparent,
-                      Colors.black54,
-                      Colors.black87,
-                    ],
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 14,
-                left: 14,
-                right: 14,
-                child: Row(
-                  children: List.generate(
-                    visiblePhotos.length,
-                    (index) => Expanded(
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
-                        height: 4,
-                        margin: EdgeInsets.only(
-                          right: index == visiblePhotos.length - 1 ? 0 : 5,
-                        ),
-                        decoration: BoxDecoration(
-                          color: index == _currentPhotoIndex
-                              ? Colors.white
-                              : Colors.white.withOpacity(0.34),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 28,
-                right: 14,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 11,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.42),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                      color: Colors.white.withOpacity(0.18),
-                    ),
-                  ),
-                  child: Text(
-                    '${_currentPhotoIndex + 1} / ${visiblePhotos.length}',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-              ),
-              if (hasMoreHidden)
+
+                // Foto-Zähler oben
                 Positioned(
-                  left: 16,
-                  right: 16,
-                  bottom: 16,
+                  top: 12,
+                  right: 12,
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 10,
+                      horizontal: 10,
+                      vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.48),
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(
-                        color: Colors.white.withOpacity(0.18),
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Text(
+                      '${_currentPhotoIndex + 1} / ${visiblePhotos.length}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
                       ),
                     ),
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.lock_open_rounded,
+                  ),
+                ),
+
+                // Hinweis, dass es mehr Fotos gäbe (Abo-Gating)
+                if (hasMoreHidden)
+                  Positioned(
+                    bottom: 12,
+                    left: 12,
+                    right: 12,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: const Text(
+                        'Mehr Fotos mit Premium / Gold sichtbar 🔓',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
                           color: Colors.white,
-                          size: 16,
+                          fontSize: 12,
                         ),
-                        SizedBox(width: 8),
-                        Flexible(
-                          child: Text(
-                            'Mehr Fotos mit Premium / Gold sichtbar',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-
-  Widget _buildHeroInfoCard({
-    required BuildContext context,
-    required DiscoveryProfile profile,
-    required String displayName,
-    required String? locationText,
-    required String? jobText,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.92),
-        borderRadius: BorderRadius.circular(28),
-        border: Border.all(color: Colors.white.withOpacity(0.7)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 24,
-            offset: const Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(
-                child: Text(
-                  displayName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.4,
                       ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              _buildOnlineChip(profile),
-            ],
-          ),
-          const SizedBox(height: 10),
-          _buildSubscriptionChip(profile),
-          if (locationText != null || jobText != null) ...[
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                if (locationText != null)
-                  _detailPill(
-                    icon: Icons.location_on_rounded,
-                    text: locationText,
-                  ),
-                if (jobText != null)
-                  _detailPill(
-                    icon: Icons.work_rounded,
-                    text: jobText,
+                    ),
                   ),
               ],
             ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSectionCard({
-    required BuildContext context,
-    required IconData icon,
-    required String title,
-    required Widget child,
-  }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.9),
-        borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: Colors.white.withOpacity(0.72)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 18,
-            offset: const Offset(0, 8),
           ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.12),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  icon,
-                  color: AppColors.primary,
-                  size: 18,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                title,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          child,
-        ],
-      ),
-    );
-  }
-
-  Widget _detailPill({
-    required IconData icon,
-    required String text,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: Colors.black54),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              text,
-              style: const TextStyle(
-                color: Colors.black87,
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
-              ),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
   Widget _buildOnlineChip(DiscoveryProfile profile) {
-    final active = profile.isOnline;
-
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: active
-            ? Colors.greenAccent.withOpacity(0.18)
-            : Colors.black.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: active
-              ? Colors.green.withOpacity(0.22)
-              : Colors.black.withOpacity(0.06),
-        ),
+        color: Colors.black12,
+        borderRadius: BorderRadius.circular(18),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -688,26 +468,16 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
             width: 8,
             height: 8,
             decoration: BoxDecoration(
-              color: active ? Colors.green : Colors.grey,
+              color: profile.isOnline ? Colors.greenAccent : Colors.grey,
               shape: BoxShape.circle,
-              boxShadow: active
-                  ? [
-                      BoxShadow(
-                        color: Colors.green.withOpacity(0.45),
-                        blurRadius: 8,
-                        spreadRadius: 1,
-                      ),
-                    ]
-                  : null,
             ),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
           Text(
-            active ? 'Online' : 'Offline',
-            style: TextStyle(
-              color: active ? Colors.green.shade800 : Colors.black54,
+            profile.isOnline ? 'Online' : 'Offline',
+            style: const TextStyle(
+              color: Colors.black87,
               fontSize: 12,
-              fontWeight: FontWeight.w800,
             ),
           ),
         ],
@@ -723,56 +493,46 @@ class _ProfileDetailScreenState extends State<ProfileDetailScreen> {
     String text;
     IconData icon;
     Color color;
-    Color foreground;
 
     if (profile.isGold) {
       text = 'Gold';
       icon = Icons.diamond_rounded;
       color = AppColors.accentGold;
-      foreground = Colors.black;
     } else {
       text = 'Premium';
       icon = Icons.star_rounded;
       color = AppColors.primary;
-      foreground = Colors.white;
     }
 
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(999),
-          boxShadow: [
-            BoxShadow(
-              color: color.withOpacity(0.28),
-              blurRadius: 14,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 16,
-              color: foreground,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              text,
-              style: TextStyle(
-                color: foreground,
-                fontWeight: FontWeight.w900,
-                fontSize: 12,
-                letterSpacing: 0.2,
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.black12,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 16,
+                color: color,
               ),
-            ),
-          ],
+              const SizedBox(width: 4),
+              Text(
+                text,
+                style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
+      ],
     );
   }
 }

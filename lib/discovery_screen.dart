@@ -256,11 +256,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
   }
 
   bool get _shouldShowSoftUpgradeHint {
-    final quota = _quota;
-    if (quota == null || quota.unlimited) return false;
-
-    final remaining = quota.remainingLikesToday ?? 0;
-    return remaining > 0 && remaining <= 5;
+    return false;
   }
 
   String _almostOutTitle(AppStrings t) {
@@ -1291,6 +1287,71 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
     );
   }
 
+  Widget _buildCompactQuotaBanner() {
+    final quota = _quota;
+    final t = AppStrings.of(context);
+
+    if (quota == null || quota.unlimited) {
+      return const SizedBox.shrink();
+    }
+
+    final remaining = quota.remainingLikesToday ?? 0;
+
+    final text = t.isGerman
+        ? 'Noch $remaining Likes heute'
+        : t.isThai
+            ? 'วันนี้เหลืออีก $remaining ไลก์'
+            : '$remaining likes left today';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: _openUpgrade,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.pink.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: Colors.pink.withValues(alpha: 0.10),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.favorite_rounded,
+                color: Colors.pink.shade400,
+                size: 18,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  text,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              Text(
+                t.isGerman
+                    ? 'Upgrade'
+                    : t.isThai
+                        ? 'อัปเกรด'
+                        : 'Upgrade',
+                style: TextStyle(
+                  color: Colors.pink.shade700,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSoftUpgradeHint() {
     final quota = _quota;
     final t = AppStrings.of(context);
@@ -1630,17 +1691,7 @@ class _DiscoveryScreenState extends State<DiscoveryScreen> {
                   ),
                 ),
               ] else ...[
-                if (_quota != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 4, 14, 10),
-                    child: LikeQuotaCard(
-                      quota: _quota!,
-                      onUpgradeTap: _openUpgrade,
-                    ),
-                  ),
-                if (_shouldShowAlmostOutBanner) _buildAlmostOutBanner(),
-                if (!_shouldShowAlmostOutBanner && _shouldShowSoftUpgradeHint)
-                  _buildSoftUpgradeHint(),
+                if (_shouldShowAlmostOutBanner) _buildCompactQuotaBanner(),
                 Expanded(
                   child: Center(
                     child: ConstrainedBox(

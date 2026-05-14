@@ -187,7 +187,7 @@ class _LegalContentScreenState extends State<LegalContentScreen> {
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.black.withValues(alpha: 0.68),
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w700,
                   height: 1.35,
                 ),
               ),

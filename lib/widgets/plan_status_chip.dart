@@ -52,7 +52,6 @@ class PlanStatusChip extends StatelessWidget {
         fg = const Color(0xFF374151);
         break;
       case PlanStatus.free:
-      default:
         text = 'FREE';
         icon = Icons.lock_open;
         bg = const Color(0xFFF3F4F6);

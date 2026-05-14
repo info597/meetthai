@@ -363,7 +363,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
           text,
           style: TextStyle(
             color: Colors.black.withValues(alpha: 0.62),
-            fontWeight: FontWeight.w600,
+            fontWeight: FontWeight.w700,
             fontSize: 13,
           ),
         ),
@@ -402,7 +402,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: Colors.black.withValues(alpha: 0.65),
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],

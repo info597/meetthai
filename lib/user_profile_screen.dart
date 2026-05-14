@@ -92,7 +92,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             .from('matches')
             .select('conversation_id')
             .or(
-              'and(user_a.eq.$me.id,user_b.eq.$widget.userId),and(user_a.eq.$widget.userId,user_b.eq.$me.id)',
+              'and(user_a.eq.${me.id},user_b.eq.${widget.userId}),and(user_a.eq.${widget.userId},user_b.eq.${me.id})',
             )
             .maybeSingle(),
         _supa
@@ -105,7 +105,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             .from('user_blocks')
             .select('blocker_user_id, blocked_user_id')
             .or(
-              'and(blocker_user_id.eq.$me.id,blocked_user_id.eq.$widget.userId),and(blocker_user_id.eq.$widget.userId,blocked_user_id.eq.$me.id)',
+              'and(blocker_user_id.eq.${me.id},blocked_user_id.eq.${widget.userId}),and(blocker_user_id.eq.${widget.userId},blocked_user_id.eq.${me.id})',
             )
             .maybeSingle(),
       ]);

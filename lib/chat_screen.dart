@@ -1555,7 +1555,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 style: TextStyle(
                   fontSize: 11,
                   color: Colors.red,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
             ],
@@ -1728,10 +1728,10 @@ class _ChatScreenState extends State<ChatScreen> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.22),
+              color: Colors.white.withValues(alpha: 0.22),
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
-                color: Colors.white.withOpacity(0.25),
+                color: Colors.white.withValues(alpha: 0.25),
               ),
             ),
             child: Column(
@@ -1826,9 +1826,9 @@ class _ChatScreenState extends State<ChatScreen> {
           width: double.infinity,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.04),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.black.withOpacity(0.08)),
+            color: Colors.black.withValues(alpha: 0.04),
+            borderRadius: BorderRadius.circular(34),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1851,8 +1851,8 @@ class _ChatScreenState extends State<ChatScreen> {
               Text(
                 'Du kannst keine Nachrichten mehr senden oder empfangen.',
                 style: TextStyle(
-                  color: Colors.black.withOpacity(0.68),
-                  fontWeight: FontWeight.w600,
+                  color: Colors.black.withValues(alpha: 0.68),
+                  fontWeight: FontWeight.w800,
                 ),
                 textAlign: TextAlign.center,
               ),
@@ -1881,9 +1881,9 @@ class _ChatScreenState extends State<ChatScreen> {
             'Keine älteren Nachrichten mehr.',
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: Colors.black.withOpacity(0.45),
+              color: Colors.black.withValues(alpha: 0.45),
               fontSize: 12,
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w800,
             ),
           ),
         );
@@ -1978,7 +1978,7 @@ class _ChatScreenState extends State<ChatScreen> {
                             ? Colors.redAccent
                             : _otherIsTyping
                                 ? Colors.greenAccent
-                                : Colors.white.withOpacity(0.85),
+                                : Colors.white.withValues(alpha: 0.85),
                         fontWeight: FontWeight.w500,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -2038,7 +2038,7 @@ class _ChatScreenState extends State<ChatScreen> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              color: Colors.amber.withOpacity(0.28),
+              color: Colors.amber.withValues(alpha: 0.28),
               child: Text(
                 _debugStatus!,
                 style: const TextStyle(fontSize: 12),
@@ -2051,9 +2051,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.04),
+                  color: Colors.black.withValues(alpha: 0.04),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.black.withOpacity(0.08)),
+                  border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
                 ),
                 child: Row(
                   children: [
@@ -2063,8 +2063,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       child: Text(
                         'Du kannst in ${_formatWait(_cooldownSeconds)} wieder senden.',
                         style: TextStyle(
-                          color: Colors.black.withOpacity(0.75),
-                          fontWeight: FontWeight.w600,
+                          color: Colors.black.withValues(alpha: 0.75),
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
                     ),
@@ -2122,10 +2122,10 @@ class _ChatScreenState extends State<ChatScreen> {
                                     : (isMe
                                         ? Colors.pink.shade100
                                         : Colors.grey.shade300),
-                                borderRadius: BorderRadius.circular(24),
+                                borderRadius: BorderRadius.circular(32),
                                 border: m.isFailed
                                     ? Border.all(
-                                        color: Colors.red.withOpacity(0.4),
+                                        color: Colors.red.withValues(alpha: 0.4),
                                       )
                                     : (isHighlighted
                                         ? Border.all(
@@ -2187,7 +2187,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                     const SizedBox(width: 8),
                     IconButton(
-                      icon: const Icon(Icons.send),
+                      icon: const Icon(Icons.send_rounded),
                       onPressed: sendDisabled ? null : _send,
                     ),
                   ],
@@ -2366,7 +2366,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
                     width: 52,
                     height: 52,
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.45),
+                      color: Colors.black.withValues(alpha: 0.45),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(

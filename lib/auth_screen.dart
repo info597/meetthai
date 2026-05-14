@@ -140,6 +140,30 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
+
+  Future<void> _resetPassword() async {
+    final email = _emailCtrl.text.trim().toLowerCase();
+
+    if (email.isEmpty || !email.contains('@')) {
+      _snack('Bitte zuerst deine E-Mail eingeben.');
+      return;
+    }
+
+    try {
+      await _supa.auth.resetPasswordForEmail(email);
+
+      if (!mounted) return;
+
+      _snack(
+        'Passwort-Reset E-Mail wurde gesendet. Bitte prüfe dein Postfach.',
+      );
+    } on AuthException catch (e) {
+      _snack('Reset fehlgeschlagen: ${e.message}');
+    } catch (e) {
+      _snack('Fehler: $e');
+    }
+  }
+
   void _snack(String text) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(text)),
@@ -283,7 +307,23 @@ class _AuthScreenState extends State<AuthScreen> {
                                       return null;
                                     },
                                   ),
-                                  const SizedBox(height: 18),
+                                  const SizedBox(height: 12),
+
+                                  if (_isLogin)
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: TextButton(
+                                        onPressed: _loading
+                                            ? null
+                                            : _resetPassword,
+                                        child: const Text(
+                                          'Passwort vergessen?',
+                                        ),
+                                      ),
+                                    ),
+
+                                  const SizedBox(height: 6),
+
                                   SizedBox(
                                     height: 48,
                                     child: ElevatedButton(

@@ -266,7 +266,7 @@ class PushService {
         ? notification!.title!.trim()
         : (data['other_display_name']?.toString().trim().isNotEmpty ?? false)
             ? data['other_display_name'].toString().trim()
-            : 'Neue Nachricht';
+            : '💬 Neue Nachricht';
 
     String body;
     if (notification?.body?.trim().isNotEmpty ?? false) {
@@ -280,7 +280,7 @@ class PushService {
       } else if (messageType == 'short') {
         body = '🎬 Short';
       } else {
-        body = rawBody.isNotEmpty ? rawBody : 'Du hast eine neue Nachricht';
+        body = rawBody.isNotEmpty ? rawBody : 'Du hast eine neue Nachricht 💬';
       }
     }
 

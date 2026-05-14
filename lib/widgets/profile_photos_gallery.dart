@@ -296,6 +296,8 @@ class _FullscreenGalleryState extends State<_FullscreenGallery> {
         itemCount: widget.photos.length,
         itemBuilder: (context, i) {
           return InteractiveViewer(
+            minScale: 1,
+            maxScale: 4,
             child: Center(
               child: Image.network(
                 widget.photos[i].fullUrl,

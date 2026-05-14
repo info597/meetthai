@@ -333,7 +333,7 @@ class _LikesScreenState extends State<LikesScreen> with WidgetsBindingObserver {
       return;
     }
 
-    if (!context.mounted) return;
+    if (!mounted) return;
 
     final blocked = await Navigator.of(context).push<bool>(
           MaterialPageRoute(
@@ -599,7 +599,7 @@ class _LikesScreenState extends State<LikesScreen> with WidgetsBindingObserver {
             style: TextStyle(
               color: Colors.black.withValues(alpha: 0.76),
               height: 1.35,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w800,
               fontSize: 15,
             ),
           ),
@@ -619,7 +619,7 @@ class _LikesScreenState extends State<LikesScreen> with WidgetsBindingObserver {
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 15),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(36),
                 ),
               ),
             ),
@@ -691,7 +691,7 @@ class _LikesScreenState extends State<LikesScreen> with WidgetsBindingObserver {
 
   Widget _buildMiniPlanBadge(String text) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.82),
         borderRadius: BorderRadius.circular(999),
@@ -763,7 +763,7 @@ class _LikesScreenState extends State<LikesScreen> with WidgetsBindingObserver {
             text,
             style: TextStyle(
               color: Colors.black.withValues(alpha: 0.76),
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w800,
               fontSize: 12,
             ),
           ),
@@ -873,7 +873,7 @@ class _LikesScreenState extends State<LikesScreen> with WidgetsBindingObserver {
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w800,
                           height: 1.3,
                         ),
                       ),
@@ -994,7 +994,7 @@ class _LikesScreenState extends State<LikesScreen> with WidgetsBindingObserver {
                                 : 'Open',
                         style: const TextStyle(
                           fontSize: 11,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w800,
                           color: Colors.black87,
                         ),
                       ),
@@ -1060,7 +1060,7 @@ class _LikesScreenState extends State<LikesScreen> with WidgetsBindingObserver {
                                   style: TextStyle(
                                     color: Colors.white.withValues(alpha: 0.82),
                                     fontSize: 11,
-                                    fontWeight: FontWeight.w700,
+                                    fontWeight: FontWeight.w800,
                                   ),
                                 ),
                               ),
@@ -1157,7 +1157,7 @@ class _LikesScreenState extends State<LikesScreen> with WidgetsBindingObserver {
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     fontSize: 18,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -1170,7 +1170,7 @@ class _LikesScreenState extends State<LikesScreen> with WidgetsBindingObserver {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.black.withValues(alpha: 0.64),
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
               ],

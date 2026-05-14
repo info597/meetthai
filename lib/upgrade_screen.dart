@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 
 import 'i18n/app_strings.dart';
 import 'services/subscription_service.dart';
@@ -15,6 +18,7 @@ class UpgradeScreen extends StatefulWidget {
 
 class _UpgradeScreenState extends State<UpgradeScreen> {
   final TextEditingController _promoCodeController = TextEditingController();
+  final _supa = Supabase.instance.client;
 
   bool _loading = true;
   bool _purchasing = false;
@@ -110,11 +114,29 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
     _goldYearly = findByProductId('meethai_gold_year');
   }
 
+
+  Future<String> _getPromoDeviceId() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    const key = 'promo_device_id';
+
+    final existing = prefs.getString(key);
+    if (existing != null && existing.isNotEmpty) {
+      return existing;
+    }
+
+    final newId = const Uuid().v4();
+
+    await prefs.setString(key, newId);
+
+    return newId;
+  }
+
   Future<void> _activatePromoCode() async {
     if (_activatingPromo || _purchasing || _restoring) return;
 
     final t = AppStrings.of(context);
-    final code = _promoCodeController.text.trim();
+    final code = _promoCodeController.text.trim().toUpperCase();
 
     if (code.isEmpty) {
       setState(() {
@@ -133,23 +155,93 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
     });
 
     try {
-      final success =
-          await SubscriptionService.instance.activatePromoCode(code);
+      final deviceId = await _getPromoDeviceId();
+
+      final response = await _supa.rpc(
+        'redeem_promo_code',
+        params: {
+          'p_code': code,
+          'p_device_id': deviceId,
+        },
+      );
+
+      final data = response is Map ? response : <String, dynamic>{};
+      final success = data['success'] == true;
 
       if (!mounted) return;
 
       if (!success) {
+        final reason = data['reason']?.toString() ?? '';
+
+        String errorText;
+
+        switch (reason) {
+          case 'invalid_code':
+            errorText = t.isGerman
+                ? 'Promo-Code ungültig.'
+                : t.isThai
+                    ? 'รหัสโปรโมชันไม่ถูกต้อง'
+                    : 'Invalid promo code.';
+            break;
+
+          case 'inactive_code':
+            errorText = t.isGerman
+                ? 'Dieser Promo-Code ist nicht mehr aktiv.'
+                : t.isThai
+                    ? 'รหัสโปรโมชันนี้ไม่ได้ใช้งานแล้ว'
+                    : 'This promo code is no longer active.';
+            break;
+
+          case 'code_limit_reached':
+            errorText = t.isGerman
+                ? 'Dieser Promo-Code ist bereits ausgeschöpft.'
+                : t.isThai
+                    ? 'รหัสโปรโมชันนี้ถูกใช้ครบแล้ว'
+                    : 'Promo code limit reached.';
+            break;
+
+          case 'device_already_used_promo':
+            errorText = t.isGerman
+                ? 'Dieses Gerät hat bereits einen Promo-Code verwendet.'
+                : t.isThai
+                    ? 'อุปกรณ์นี้เคยใช้รหัสโปรโมชันแล้ว'
+                    : 'This device already used a promo code.';
+            break;
+
+          case 'user_already_used_promo':
+            errorText = t.isGerman
+                ? 'Dieser Account hat bereits einen Promo-Code verwendet.'
+                : t.isThai
+                    ? 'บัญชีนี้เคยใช้รหัสโปรโมชันแล้ว'
+                    : 'This account already used a promo code.';
+            break;
+
+          case 'not_authenticated':
+            errorText = t.isGerman
+                ? 'Bitte melde dich zuerst an.'
+                : t.isThai
+                    ? 'กรุณาเข้าสู่ระบบก่อน'
+                    : 'Please sign in first.';
+            break;
+
+          default:
+            errorText = t.isGerman
+                ? 'Promo-Code konnte nicht aktiviert werden.'
+                : t.isThai
+                    ? 'ไม่สามารถเปิดใช้งานรหัสโปรโมชันได้'
+                    : 'Promo code could not be activated.';
+        }
+
         setState(() {
           _activatingPromo = false;
-          _error = t.isGerman
-              ? 'Code ist ungültig.'
-              : t.isThai
-                  ? 'รหัสไม่ถูกต้อง'
-                  : 'Code is invalid.';
+          _error = errorText;
         });
+
         return;
       }
 
+      await SubscriptionState.instance.refreshFromSupabase();
+      await SubscriptionState.instance.refresh();
       await _loadCurrentPlanState();
 
       if (!mounted) return;
@@ -162,10 +254,10 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
         SnackBar(
           content: Text(
             t.isGerman
-                ? 'Gratis-Zugang wurde freigeschaltet.'
+                ? 'Premium für 6 Monate aktiviert!'
                 : t.isThai
-                    ? 'เปิดใช้งานสิทธิ์ฟรีแล้ว'
-                    : 'Free access has been unlocked.',
+                    ? 'เปิดใช้งาน Premium เป็นเวลา 6 เดือนแล้ว'
+                    : 'Premium activated for 6 months!',
           ),
         ),
       );
@@ -177,10 +269,10 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
       setState(() {
         _activatingPromo = false;
         _error = t.isGerman
-            ? 'Code konnte nicht aktiviert werden: $e'
+            ? 'Promo-Code konnte nicht aktiviert werden: $e'
             : t.isThai
-                ? 'ไม่สามารถเปิดใช้งานรหัสได้: $e'
-                : 'Code could not be activated: $e';
+                ? 'ไม่สามารถเปิดใช้งานรหัสโปรโมชันได้: $e'
+                : 'Promo code could not be activated: $e';
       });
     }
   }
@@ -374,7 +466,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                       ? 'ใส่รหัส'
                       : 'Enter code',
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(28),
+                borderRadius: BorderRadius.circular(40),
               ),
               prefixIcon: const Icon(Icons.key_rounded),
             ),
@@ -404,7 +496,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 14),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(28),
+                borderRadius: BorderRadius.circular(40),
               ),
             ),
           ),
@@ -429,7 +521,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
             child: Text(
               text,
               style: const TextStyle(
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w800,
                 height: 1.3,
               ),
             ),
@@ -480,7 +572,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                       subtitle,
                       style: TextStyle(
                         color: Colors.black.withValues(alpha: 0.68),
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ],
@@ -539,7 +631,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                 disabledForegroundColor: Colors.black87,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(28),
+                  borderRadius: BorderRadius.circular(40),
                 ),
               ),
               label: Text(
@@ -572,14 +664,14 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         color: highlighted ? color.withValues(alpha: 0.12) : Colors.white,
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(40),
         border: Border.all(
           color: highlighted ? color.withValues(alpha: 0.35) : Colors.black12,
           width: highlighted ? 1.4 : 1,
         ),
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(28),
+        borderRadius: BorderRadius.circular(40),
         onTap: (_purchasing || _restoring || _activatingPromo)
             ? null
             : () => _buyPackage(package),
@@ -714,7 +806,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                       subtitle,
                       style: TextStyle(
                         color: Colors.black.withValues(alpha: 0.68),
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ],
@@ -774,7 +866,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                   disabledForegroundColor: Colors.black87,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(28),
+                    borderRadius: BorderRadius.circular(40),
                   ),
                 ),
                 label: Text(
@@ -793,7 +885,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(28),
+                borderRadius: BorderRadius.circular(40),
                 border: Border.all(color: Colors.black12),
               ),
               child: Text(
@@ -803,7 +895,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                         ? 'ขณะนี้ยังไม่มีแพ็กเกจ'
                         : 'No packages currently available.',
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontWeight: FontWeight.w700),
+                style: const TextStyle(fontWeight: FontWeight.w800),
               ),
             )
           else
@@ -947,7 +1039,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                             Color(0xFFFF7A59),
                           ],
                         ),
-                        borderRadius: BorderRadius.circular(24),
+                        borderRadius: BorderRadius.circular(36),
                         boxShadow: [
                           BoxShadow(
                             color: Colors.pinkAccent,
@@ -990,7 +1082,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                           _error!,
                           style: const TextStyle(
                             color: Colors.red,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w800,
                           ),
                         ),
                       ),
@@ -1125,7 +1217,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                       isActive: _isGoldActive,
                       features: [
                         t.isGerman
-                            ? 'Unbegrenzte Likes senden'
+                            ? 'Unbegrenzte Likes • KI-Chatübersetzung senden'
                             : t.isThai
                                 ? 'ส่งไลก์ได้ไม่จำกัด'
                                 : 'Send unlimited likes',
@@ -1157,7 +1249,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         color: Colors.black.withValues(alpha: 0.04),
-                        borderRadius: BorderRadius.circular(28),
+                        borderRadius: BorderRadius.circular(40),
                         border: Border.all(
                           color: Colors.black.withValues(alpha: 0.06),
                         ),

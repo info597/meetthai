@@ -944,7 +944,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                           textAlign: TextAlign.center,
                           style: const TextStyle(
                             color: Colors.white70,
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w900,
                           ),
                         ),
                       ),
@@ -1179,7 +1179,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                               t.selectLanguages,
                               style: const TextStyle(
                                 fontSize: 18,
-                                fontWeight: FontWeight.w800,
+                                fontWeight: FontWeight.w900,
                               ),
                             ),
                           ),
@@ -1202,7 +1202,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                           t.multipleChoicePossible,
                           style: TextStyle(
                             color: Colors.black.withValues(alpha: 0.65),
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w900,
                           ),
                         ),
                       ),
@@ -1297,7 +1297,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                               t.selectHobbies,
                               style: const TextStyle(
                                 fontSize: 18,
-                                fontWeight: FontWeight.w800,
+                                fontWeight: FontWeight.w900,
                               ),
                             ),
                           ),
@@ -1320,7 +1320,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                           t.multipleChoicePossible,
                           style: TextStyle(
                             color: Colors.black.withValues(alpha: 0.65),
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w900,
                           ),
                         ),
                       ),
@@ -1535,7 +1535,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     IconData? icon,
   }) {
     return DropdownButtonFormField<String>(
-      value: items.contains(value) ? value : null,
+      initialValue: items.contains(value) ? value : null,
       isExpanded: true,
       decoration: InputDecoration(
         labelText: label,
@@ -1577,7 +1577,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
             child: Text(
               text,
               style: const TextStyle(
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w900,
                 fontSize: 12,
               ),
             ),
@@ -1777,7 +1777,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
               _t.privateMessengerInfo,
               style: TextStyle(
                 color: Colors.black.withValues(alpha: 0.68),
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w900,
                 height: 1.35,
               ),
             ),
@@ -1808,7 +1808,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           Text(
             title,
             style: const TextStyle(
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w900,
             ),
           ),
           RangeSlider(
@@ -1841,7 +1841,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           Text(
             _searchRadiusLabel,
             style: const TextStyle(
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w900,
             ),
           ),
           Slider(
@@ -2252,7 +2252,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
               _preferredPartnerSectionTitle,
               style: const TextStyle(
                 fontSize: 16,
-                fontWeight: FontWeight.w800,
+                fontWeight: FontWeight.w900,
               ),
             ),
           ),
@@ -2366,7 +2366,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(42),
         border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
         boxShadow: [
           BoxShadow(
@@ -2383,7 +2383,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
             title,
             style: const TextStyle(
               fontSize: 17,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w900,
             ),
           ),
           const SizedBox(height: 14),
@@ -2417,7 +2417,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                       t.profilePictureHint,
                       style: TextStyle(
                         color: Colors.black.withValues(alpha: 0.65),
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w900,
                       ),
                       textAlign: TextAlign.center,
                     ),

@@ -929,7 +929,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   Colors.purple.withValues(alpha: 0.08),
                 ],
               ),
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(30),
               border: Border.all(
                 color: Colors.pink.withValues(alpha: 0.14),
               ),
@@ -970,7 +970,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: TextStyle(
                     fontSize: 15,
                     color: Colors.black.withValues(alpha: 0.72),
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -979,7 +979,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.black.withValues(alpha: 0.62),
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
               ],
@@ -1019,7 +1019,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   _loadingLikes ? likesLoadingText : likesLoadedText,
                   style: TextStyle(
                     color: Colors.black.withValues(alpha: 0.7),
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
                 const SizedBox(height: 14),
@@ -1133,7 +1133,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   previewSub,
                   style: TextStyle(
                     color: Colors.black.withValues(alpha: 0.66),
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
                 const SizedBox(height: 14),
@@ -1240,7 +1240,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: TextStyle(
                     color: Colors.black.withValues(alpha: 0.68),
                     height: 1.4,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
               ],
@@ -1550,7 +1550,7 @@ class _PlanChip extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: Colors.black.withValues(alpha: 0.72),
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w800,
               ),
             ),
           ),
@@ -1608,7 +1608,7 @@ class _QuickActionCard extends StatelessWidget {
                 subtitle,
                 style: TextStyle(
                   color: Colors.black.withValues(alpha: 0.68),
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w800,
                   height: 1.3,
                 ),
               ),
@@ -1710,7 +1710,7 @@ class _PreviewProfileCard extends StatelessWidget {
               style: TextStyle(
                 color: Colors.black.withValues(alpha: 0.64),
                 fontSize: 12.5,
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w800,
                 height: 1.25,
               ),
             ),
